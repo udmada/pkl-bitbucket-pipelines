@@ -1,0 +1,996 @@
+/// Schema for [Bitbucket Pipelines](https://bitbucket.org/product/features/pipelines)
+/// `bitbucket-pipelines.yml` files.
+///
+/// Modelled on the
+/// [Bitbucket Pipelines configuration reference](https://support.atlassian.com/bitbucket-cloud/docs/bitbucket-pipelines-configuration-reference/).
+///
+/// Amend this module to describe a pipeline configuration, then render it with
+/// `pkl eval -f yaml MyPipeline.pkl`:
+///
+/// ```
+/// amends "package://pkg.pkl-lang.org/…/com.atlassian.bitbucket.pipelines@1.0.0#/Config.pkl"
+///
+/// pipelines {
+///   `default` {
+///     new Step {
+///       name = "Build"
+///       script { "./build.sh" }
+///     }
+///   }
+/// }
+/// ```
+///
+/// [YAML anchors](https://support.atlassian.com/bitbucket-cloud/docs/yaml-anchors/) are not
+/// modelled. They exist to work around YAML's lack of abstraction; in Pkl, bind the step to a
+/// `local` property and reference it as many times as needed. `definitions.steps`, whose only
+/// purpose is to hold anchors, is omitted for the same reason.
+@ModuleInfo { minPklVersion = "0.25.0" }
+module com.atlassian.bitbucket.pipelines.Config
+
+/// The default Docker image for every step in the configuration.
+///
+/// Individual steps and services may override it. Defaults to `atlassian/default-image:latest`
+/// when not set.
+///
+/// See [Docker image options](https://support.atlassian.com/bitbucket-cloud/docs/docker-image-options/).
+image: Image?
+
+/// Controls how the repository is cloned at the start of every step.
+///
+/// See [Git clone behavior](https://support.atlassian.com/bitbucket-cloud/docs/git-clone-behavior/).
+clone: Clone?
+
+/// Global settings that apply to all pipelines in the repository.
+///
+/// See [Global options](https://support.atlassian.com/bitbucket-cloud/docs/global-options/).
+options: GlobalOptions?
+
+/// Whether the pipelines under [Definitions.pipelines] may be imported by other repositories in
+/// the same workspace.
+///
+/// Not required to import within the same repository. Once a file is exported, assume every
+/// repository in the workspace can read its contents — never inline secrets into exported
+/// configuration.
+///
+/// Bitbucket Premium only. See
+/// [Share Pipelines Configurations](https://support.atlassian.com/bitbucket-cloud/docs/share-pipelines-configurations/).
+export: Boolean?
+
+/// Reusable resources referenced elsewhere in the configuration: caches, service containers,
+/// import sources, and exportable pipeline definitions.
+///
+/// See [Cache, service container, and export pipelines definitions](https://support.atlassian.com/bitbucket-cloud/docs/cache-and-service-container-definitions/).
+definitions: Definitions?
+
+/// The pipelines to run, keyed by start condition.
+///
+/// Required, unless this file exists only to export pipelines for other repositories to import
+/// (in which case define them under [Definitions.pipelines] instead).
+///
+/// See [Pipeline start conditions](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
+pipelines: PipelineDefinitions?(this != null || definitions?.pipelines != null)
+
+/// Condition-based rules that start one or more custom pipelines in parallel from a single
+/// repository event.
+///
+/// Triggers are cumulative with the start conditions under [pipelines]: if both match an event,
+/// both run.
+///
+/// See [The triggers property](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
+triggers: Triggers?
+
+//---------------------------------------------------------------------------------------------
+// Pipelines
+//---------------------------------------------------------------------------------------------
+
+/// The set of pipelines in a repository, grouped by what starts them.
+///
+/// When an event matches more than one start condition, only the most specific one runs:
+/// [branches], [tags], and [`pull-requests`] take precedence over [`default`].
+class PipelineDefinitions {
+  /// Runs on every push that does not match a pipeline in [branches].
+  ///
+  /// Pushes of Git tags do not start the default pipeline.
+  `default`: Pipeline?
+
+  /// Branch-specific pipelines, keyed by branch name or
+  /// [glob pattern](https://support.atlassian.com/bitbucket-cloud/docs/use-glob-patterns-on-the-pipelines-yaml-file/).
+  branches: Mapping<String, Pipeline>?
+
+  /// Pipelines that run when a pull request is created or updated, keyed by a branch name or
+  /// glob pattern matched against the *source* branch.
+  ///
+  /// The destination branch is merged into the working branch before the pipeline runs; if the
+  /// merge fails, the pipeline stops. Pull requests from forks do not start a pipeline.
+  ///
+  /// These run *in addition* to any matching [branches] or [`default`] pipeline, so overlapping
+  /// definitions can produce two concurrent pipelines.
+  `pull-requests`: Mapping<String, Pipeline>?
+
+  /// Tag-specific pipelines, keyed by tag name or glob pattern.
+  ///
+  /// Matched against both lightweight and annotated tags.
+  tags: Mapping<String, Pipeline>?
+
+  /// Pipelines that only start when triggered manually from the Bitbucket UI, by a schedule, or
+  /// by a [Triggers] rule, keyed by the name shown in the UI.
+  ///
+  /// Only custom pipelines can be referenced by [TriggerCondition.pipelines] and by
+  /// [ChildPipelineStep.custom].
+  custom: Mapping<String, Pipeline>?
+}
+
+/// A single pipeline: either a sequence of elements to run, or an import of a pipeline shared
+/// from elsewhere.
+typealias Pipeline = *Listing<PipelineElement> | PipelineImport
+
+/// Runs a pipeline definition shared from another file or repository in place of a local one.
+///
+/// Bitbucket Premium only. See
+/// [Share Pipelines Configurations](https://support.atlassian.com/bitbucket-cloud/docs/share-pipelines-configurations/).
+class PipelineImport {
+  /// The pipeline to import, as `<pipeline-name>@<import-source-name>`, where the source name is
+  /// a key of [Definitions.imports].
+  ///
+  /// The legacy inline form `<repo-slug>:<branch-or-tag>:<pipeline-name>` also works but is not
+  /// recommended.
+  ///
+  /// Pipeline names are matched exactly; glob patterns are not supported.
+  `import`: String
+}
+
+/// An entry in a pipeline.
+///
+/// Each entry renders as a single-key YAML mapping — `step`, `final`, `stage`, `parallel`, or
+/// `variables` — named by [__key__].
+abstract class PipelineElement {
+  /// The YAML key this element renders under.
+  hidden fixed __key__: String
+
+  /// The value rendered under [__key__]. Defaults to this element's own properties.
+  hidden __body__: Any = toMap()
+}
+
+/// A build execution unit.
+///
+/// Steps run in the order they appear, each in a fresh Docker container. A pipeline may contain
+/// at most 100 steps, counting each step of a [Parallel] group.
+///
+/// See [Step options](https://support.atlassian.com/bitbucket-cloud/docs/step-options/).
+class Step extends BaseStep {
+  hidden fixed __key__ = "step"
+
+  /// Marks this as an ordinary inline step. Optional; inline is the default.
+  ///
+  /// To trigger another pipeline instead, use [ChildPipelineStep].
+  type: "inline"?
+
+  /// The deployment environment this step deploys to, used to organize the Deployments
+  /// dashboard.
+  ///
+  /// Conventional names are `test`, `staging`, and `production`, but any configured environment
+  /// name is valid. Cannot be combined with [OnFail] strategies other than `fail`.
+  ///
+  /// See [Set up and monitor deployments](https://support.atlassian.com/bitbucket-cloud/docs/set-up-and-monitor-deployments/).
+  deployment: String?
+
+  /// The environment whose variables this step can access, subject to branch and admin
+  /// permission checks.
+  environment: String?
+
+  /// Whether the failure of this step stops every other step in its [Parallel] group.
+  ///
+  /// Only meaningful inside a parallel group. Set `false` on a step to let it fail without
+  /// stopping siblings when the group sets `true`.
+  `fail-fast`: Boolean?
+
+  /// Names of variables to export from this step into the shared pipeline variables.
+  ///
+  /// Write them in the step's script as `echo "NAME=value" >> $BITBUCKET_PIPELINES_VARIABLES_PATH`.
+  ///
+  /// See [Variables and secrets](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/).
+  `output-variables`: Listing<VariableName>?
+
+  /// Whether the step starts on its own or waits to be run by a user from the Bitbucket UI.
+  ///
+  /// The first step of a pipeline cannot be manual, and manual steps cannot be skipped or run
+  /// out of order. Artifacts expire after 14 days, after which pending manual steps can no
+  /// longer run.
+  trigger: Trigger?
+}
+
+/// A step that always runs last, whatever the outcome of the steps before it.
+///
+/// Useful for cleanup, log collection, notifications, and analytics. A pipeline may define at
+/// most one final step, it must be the last element, and at least one non-final step must
+/// precede it. Final steps cannot be placed in a [Stage] or [Parallel] group, cannot trigger a
+/// child pipeline, and support neither `deployment`, `trigger`, nor `fail-fast`.
+///
+/// See [The final property](https://support.atlassian.com/bitbucket-cloud/docs/step-options/).
+class FinalStep extends BaseStep {
+  hidden fixed __key__ = "final"
+}
+
+/// Properties shared by [Step] and [FinalStep].
+abstract class BaseStep extends PipelineElement {
+  /// A short label for the step, shown in the build logs and the Bitbucket UI.
+  ///
+  /// Should be unique within the pipeline.
+  name: String?
+
+  /// The commands to run, in order, with no cleanup between them.
+  ///
+  /// Move anything longer than a few lines into a script file in the repository and call that
+  /// instead.
+  script: Listing<ScriptItem>(!isEmpty)
+
+  /// Commands to run once [script] finishes, whether it succeeded or failed.
+  ///
+  /// Read `$BITBUCKET_EXIT_CODE` to branch on the outcome. A failure here stops the remaining
+  /// after-script commands but does not change the reported status of the step.
+  `after-script`: Listing<ScriptItem>?
+
+  /// The Docker image this step runs in, overriding the configuration-wide [image].
+  image: Image?
+
+  /// Names of caches to restore before the step and save after it.
+  ///
+  /// Each name must be either a key of [Definitions.caches] or one of the
+  /// [predefined caches](https://support.atlassian.com/bitbucket-cloud/docs/cache-dependencies/)
+  /// such as `node`, `pip`, `gradle`, or `maven`.
+  caches: Listing<String>?
+
+  /// Files to keep after the step so that later steps can use them.
+  artifacts: Artifacts?
+
+  /// Names of service containers to run alongside this step.
+  ///
+  /// Each name must be a key of [Definitions.services], or `docker` for the built-in
+  /// Docker-in-Docker service. At most five services per step.
+  services: Listing<String>?
+
+  /// Git clone behavior for this step, overriding the configuration-wide [clone].
+  clone: StepClone?
+
+  /// A rule that must hold for the step to run; otherwise it is skipped.
+  condition: Condition?
+
+  /// How long the step may run, in minutes, before it is timed out.
+  ///
+  /// Overrides [GlobalOptions.max-time]. Defaults to 120.
+  `max-time`: MaxTime?
+
+  /// The compute resources allocated to the step, overriding [GlobalOptions.size].
+  size: Size?
+
+  /// The runtime environment for the step, overriding [GlobalOptions.runtime].
+  runtime: Runtime?
+
+  /// Whether to issue an OpenID Connect identity token for this step, exposed as
+  /// `$BITBUCKET_STEP_OIDC_TOKEN`.
+  ///
+  /// Lets the step authenticate to a resource server without storing long-lived credentials.
+  ///
+  /// See [Integrate Pipelines with resource servers using OIDC](https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/).
+  oidc: Boolean?
+
+  /// Labels identifying which self-hosted runner may run this step.
+  ///
+  /// The step runs on the next available runner carrying *all* of these labels, waiting if they
+  /// are busy and failing if no online runner matches. Omit to run on Atlassian's
+  /// infrastructure.
+  ///
+  /// See [Runners](https://support.atlassian.com/bitbucket-cloud/docs/runners/).
+  `runs-on`: (*Listing<String> | String)?
+
+  /// How to handle failure of this step.
+  `on-fail`: OnFail?
+
+  /// A name that serializes this step against others sharing it.
+  ///
+  /// At most one step per group runs at a time, across pipelines; the rest queue first-in,
+  /// first-out.
+  `concurrency-group`: String?
+}
+
+/// A step that triggers another pipeline — a "child pipeline" — instead of running commands.
+///
+/// Lets a large workflow be split into modular pieces and gain parallelism. The referenced
+/// pipeline must be defined under [PipelineDefinitions.custom].
+///
+/// Because this step only triggers a pipeline and never runs in a container of its own, it
+/// supports none of `image`, `clone`, `size`, `runtime`, `caches`, `services`, `oidc`,
+/// `runs-on`, `output-variables`, or `deployment` — set those inside the child pipeline instead.
+/// A child pipeline step also cannot appear in a [Stage].
+///
+/// See [Child pipeline step options](https://support.atlassian.com/bitbucket-cloud/docs/child-pipeline-step-options/).
+class ChildPipelineStep extends PipelineElement {
+  hidden fixed __key__ = "step"
+
+  /// A short label for the step, shown in the build logs and the Bitbucket UI.
+  name: String?
+
+  /// Marks this step as a child pipeline trigger.
+  fixed type: "pipeline" = "pipeline"
+
+  /// The name of the custom pipeline to run, as defined under [PipelineDefinitions.custom].
+  custom: String
+
+  /// Variables to pass into the child pipeline, where they become pipeline variables.
+  ///
+  /// At most 20 entries.
+  `input-variables`: Mapping<VariableName, String | Number | Boolean>?(length <= 20)
+
+  /// Named artifacts to hand into the child pipeline and to carry back out of it.
+  artifacts: ChildPipelineArtifacts?
+
+  /// A rule that must hold for the step to run; otherwise it is skipped.
+  condition: Condition?
+
+  /// Whether the step starts on its own or waits to be run by a user from the Bitbucket UI.
+  trigger: Trigger?
+
+  /// Whether the failure of this step stops every other step in its [Parallel] group.
+  `fail-fast`: Boolean?
+
+  /// How to handle failure of this step.
+  `on-fail`: OnFail?
+
+  /// How long the step may run, in minutes, before it is timed out.
+  `max-time`: MaxTime?
+}
+
+/// A group of steps that run at the same time.
+///
+/// Parallelism shortens wall-clock time but does not reduce the build minutes consumed. Each
+/// step in the group counts toward the 100-step limit of the pipeline.
+///
+/// Steps in a group can consume artifacts produced by *earlier* steps, but not artifacts
+/// produced by their siblings. Steps after the group receive the union of everything the group
+/// produced; where two siblings wrote the same path, the one declared last wins.
+///
+/// Inside the group, `$BITBUCKET_PARALLEL_STEP` holds the zero-based index of the step and
+/// `$BITBUCKET_PARALLEL_STEP_COUNT` the size of the group.
+///
+/// See [Parallel step options](https://support.atlassian.com/bitbucket-cloud/docs/parallel-step-options/).
+class Parallel extends PipelineElement {
+  hidden fixed __key__ = "parallel"
+
+  /// The steps to run concurrently. At least one is required.
+  steps: Listing<Step | ChildPipelineStep>(!isEmpty)
+
+  /// Whether the failure of any step stops the whole group.
+  ///
+  /// Individual steps may opt out with [Step.fail-fast]. Only the `fail` strategy of [OnFail] is
+  /// compatible with fail-fast; `retry` and `ignore` are disabled anywhere in a group that sets
+  /// it.
+  `fail-fast`: Boolean?
+
+  /// How to handle failure of the steps in this group, unless a step overrides it.
+  `on-fail`: OnFail?
+}
+
+/// A group of steps that run at the same time, written as a bare list.
+///
+/// This is the legacy shorthand for [Parallel] and carries no group-level options. Prefer
+/// [Parallel], which additionally supports `fail-fast` and `on-fail`.
+class ParallelSteps extends PipelineElement {
+  hidden fixed __key__ = "parallel"
+
+  hidden __body__ = steps
+
+  /// The steps to run concurrently. At least one is required.
+  steps: Listing<Step | ChildPipelineStep>(!isEmpty)
+}
+
+/// A group of sequential steps sharing a set of properties.
+///
+/// Stages let a deployment be expressed as several steps that share one environment lock and one
+/// set of deployment variables, and that can be rerun from the point of failure rather than from
+/// the start.
+///
+/// A stage holds at most 10 steps on the Free plan and 100 on Standard or Premium. Stages cannot
+/// be nested or parallelized, cannot contain [Parallel] groups, [FinalStep]s, or
+/// [ChildPipelineStep]s, and cannot contain individually manual or conditional steps — make the
+/// stage itself manual or conditional instead. Steps in a stage cannot override a property set
+/// on the stage, nor opt out of downloading artifacts.
+///
+/// See [Stage options](https://support.atlassian.com/bitbucket-cloud/docs/stage-options/).
+class Stage extends PipelineElement {
+  hidden fixed __key__ = "stage"
+
+  /// A short label for the stage, shown in the build logs and the Bitbucket UI.
+  name: String?
+
+  /// The deployment environment this stage deploys to.
+  ///
+  /// Every step in the stage becomes a deployment step, and the stage holds a lock on the
+  /// environment for its duration.
+  deployment: String?
+
+  /// The environment whose variables every step in this stage can access.
+  environment: String?
+
+  /// A rule that must hold for the stage to run; otherwise it is skipped.
+  condition: Condition?
+
+  /// Whether the stage starts on its own or waits to be run by a user from the Bitbucket UI.
+  ///
+  /// The first stage of a pipeline cannot be manual.
+  trigger: Trigger?
+
+  /// How to handle failure of the steps in this stage, unless a step overrides it.
+  `on-fail`: OnFail?
+
+  /// The steps to run in order. At least one is required.
+  steps: Listing<Step>(!isEmpty)
+}
+
+/// Variables that can be set when a custom pipeline is started.
+///
+/// Only valid as the first element of a pipeline under [PipelineDefinitions.custom]; variables
+/// cannot be declared for automatically triggered pipelines.
+///
+/// See [Custom pipeline variables](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
+class Variables extends PipelineElement {
+  hidden fixed __key__ = "variables"
+
+  hidden __body__ = variables
+
+  /// The variables to prompt for.
+  variables: Listing<CustomVariable>(!isEmpty)
+}
+
+/// A variable that a user can set when starting a custom pipeline.
+class CustomVariable {
+  /// The name of the variable, referenced in the configuration as `$name`.
+  name: VariableName
+
+  /// The value used when the variable is not set at run time.
+  `default`: String?
+
+  /// Restricts the variable to this set of values, presented as a picker in the UI.
+  `allowed-values`: Listing<String>(!isEmpty)?
+
+  /// A short explanation, shown to whoever starts the pipeline, of what to put here.
+  description: String?
+}
+
+//---------------------------------------------------------------------------------------------
+// Scripts and pipes
+//---------------------------------------------------------------------------------------------
+
+/// A single entry in a [BaseStep.script]: either a shell command or a pipe invocation.
+typealias ScriptItem = String | Pipe
+
+/// A packaged, parameterized task run as a Docker container.
+///
+/// See [Use pipes in Bitbucket Pipelines](https://support.atlassian.com/bitbucket-cloud/docs/use-pipes-in-bitbucket-pipelines/).
+class Pipe {
+  /// The pipe to run, as `<account>/<name>:<version>` for a hosted pipe or
+  /// `docker://<account>/<image>:<version>` for one of your own.
+  ///
+  /// Pin a version rather than using `latest` so that builds stay reproducible.
+  pipe: String
+
+  /// A short label for this pipe invocation, shown in the build logs.
+  name: String?
+
+  /// The pipe's parameters, passed to the container as environment variables.
+  ///
+  /// Which of these are required varies by pipe. Pass secrets by referencing a repository or
+  /// workspace variable, as in `"$MY_SECRET"`, rather than writing the value here.
+  variables: Mapping<String, String | Number | Boolean | *Listing<String>>?
+}
+
+//---------------------------------------------------------------------------------------------
+// Artifacts
+//---------------------------------------------------------------------------------------------
+
+/// Files produced by a step and kept for later steps.
+///
+/// Either a bare list of glob patterns, or an [ArtifactsSpec] for control over downloading,
+/// naming, and retention.
+typealias Artifacts = *Listing<String> | ArtifactsSpec
+
+/// Artifact configuration for a step.
+///
+/// Paths are relative to `$BITBUCKET_CLONE_DIR` and may use glob patterns; `.` and `..` segments
+/// do not work. Artifacts are deleted 14 days after they are produced and are capped at 1 GB.
+///
+/// See [Pipeline artifacts](https://support.atlassian.com/bitbucket-cloud/docs/use-artifacts-in-steps/).
+class ArtifactsSpec {
+  /// Which artifacts from earlier steps to fetch before this step runs.
+  ///
+  /// `true` (the default) fetches everything available, `false` fetches nothing, and a list
+  /// fetches only the named artifacts and paths — worth doing when a step needs few of many, as
+  /// downloading costs build minutes.
+  download: (Boolean | *Listing<String>)?
+
+  /// Glob patterns for files to keep, for steps that do not need the naming and retention
+  /// controls of [upload].
+  paths: Listing<String>?
+
+  /// Named artifacts to keep, with control over type, exclusions, and when to capture them.
+  upload: Listing<ArtifactUpload>?
+}
+
+/// A named artifact produced by a step.
+class ArtifactUpload {
+  /// The name shown in the UI, and the handle by which later steps request this artifact in
+  /// [ArtifactsSpec.download].
+  name: String
+
+  /// How widely the artifact is available.
+  ///
+  /// `shared` artifacts can be downloaded by later steps. `scoped` artifacts stay with the step
+  /// that produced them — the right choice for logs, screenshots, and videos. `test-reports`
+  /// artifacts are scoped and may contain only XML test reports, which Bitbucket ingests to
+  /// populate the test results view.
+  ///
+  /// Defaults to `shared`.
+  type: ("shared" | "scoped" | "test-reports")?
+
+  /// Glob patterns for the files to include. At least one is required.
+  paths: Listing<String>(!isEmpty)
+
+  /// Glob patterns for files to exclude from the patterns matched by [paths].
+  `ignore-paths`: Listing<String>?
+
+  /// How far down the directory hierarchy to search for matching files.
+  ///
+  /// Defaults to the whole hierarchy.
+  depth: Int(isPositive)?
+
+  /// Which step outcomes cause the artifact to be captured.
+  ///
+  /// Defaults to `always`.
+  `capture-on`: ("success" | "failed" | "always")?
+}
+
+/// Named artifacts passed between a parent pipeline and a child pipeline.
+///
+/// Artifacts must be referred to by the names under which they were uploaded. At most 20 in each
+/// direction.
+class ChildPipelineArtifacts {
+  /// Names of artifacts to hand from the parent pipeline into the child, where every step can
+  /// download them.
+  upload: Listing<String>(length <= 20)?
+
+  /// Names of artifacts to carry from the child pipeline back out to the parent, where steps
+  /// after this one can download them.
+  download: Listing<String>(length <= 20)?
+}
+
+//---------------------------------------------------------------------------------------------
+// Flow control
+//---------------------------------------------------------------------------------------------
+
+/// Whether a step or stage starts on its own or waits for a user to run it.
+///
+/// Manual steps and stages cannot come first in a pipeline, cannot be skipped or reordered, run
+/// only after the preceding step or stage succeeds, and can be started only by users with write
+/// access.
+typealias Trigger = "automatic" | "manual"
+
+/// A rule that must hold for a step or stage to run.
+///
+/// When both [changesets] and [state] are given, both must hold; [changesets] is evaluated first
+/// and [state] is not evaluated if it fails.
+///
+/// Conditions are evaluated when the step becomes ready to start — except that a [state] on a
+/// manual step is evaluated when the user presses Run, and that conditions are re-evaluated on
+/// every retry.
+class Condition {
+  /// Runs the step or stage only when the files changed by the commit match.
+  changesets: Changesets?
+
+  /// Runs the step or stage only when this boolean expression evaluates to `true`.
+  ///
+  /// Reads environment, workspace, repository, and pipeline variables — but not secured or
+  /// vault variables. Supports `==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`, and grouping,
+  /// as in `(var_1 > 100 && var_1 <= 200) || var_2 == "ok"`.
+  ///
+  /// A variable's type is inferred from what it is compared against. Because values are strings
+  /// by default, do not add quotes of your own: for a variable holding `hello`, the expression
+  /// `var == "hello"` is true.
+  ///
+  /// At most 1000 characters.
+  state: String?(
+    this != null || changesets != null,
+    this == null || length <= 1000
+  )
+}
+
+/// Matches a step or stage against the files changed by a commit.
+///
+/// Patterns are [glob patterns](https://support.atlassian.com/bitbucket-cloud/docs/use-glob-patterns-on-the-pipelines-yaml-file/)
+/// relative to `$BITBUCKET_CLONE_DIR`.
+///
+/// In a pull request pipeline every commit is considered. In every other kind of pipeline only
+/// the most recent commit is, so pushing several commits at once can skip a step that an earlier
+/// commit would have run.
+class Changesets {
+  /// Runs the step or stage when at least one changed file matches one of these patterns.
+  includePaths: Listing<String>(!isEmpty)?
+
+  /// Skips the step or stage when *every* changed file matches one of these patterns.
+  ///
+  /// Useful for not rebuilding on documentation-only changes.
+  excludePaths: Listing<String>(!isEmpty)?(this != null || includePaths != null)
+}
+
+/// What to do when a step fails.
+///
+/// Cannot be used on deployment steps or stages. Only the `fail` strategy is compatible with
+/// [Parallel.fail-fast]; setting fail-fast anywhere in a group disables `retry` and `ignore` for
+/// the whole group.
+class OnFail {
+  /// How the failure is handled.
+  ///
+  /// `fail` stops the pipeline and marks it failed. `retry` runs the step again, up to
+  /// [maxRetryCount] times. `ignore` marks the step failed in the UI but lets the rest of the
+  /// pipeline continue and succeed.
+  strategy: "fail" | "retry" | "ignore"
+
+  /// How many times to retry, from 1 to 10. Defaults to 1.
+  ///
+  /// Only meaningful when [strategy] is `retry`.
+  maxRetryCount: Int?(
+    this == null || (strategy == "retry" && isBetween(1, 10))
+  )
+}
+
+//---------------------------------------------------------------------------------------------
+// Triggers
+//---------------------------------------------------------------------------------------------
+
+/// Rules that start custom pipelines in response to repository events.
+///
+/// Unlike the start conditions under [PipelineDefinitions], which run only the first pipeline
+/// they match, every trigger condition that matches an event runs — all in parallel.
+///
+/// At most 20 conditions per trigger type per file, and at most 100 pipelines started by a
+/// single event.
+///
+/// See [The triggers property](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
+class Triggers {
+  /// Evaluated when a commit is pushed to any branch, or a Git tag is created.
+  `repository-push`: TriggerConditions?
+
+  /// Evaluated when a pull request is created or updated.
+  `pullrequest-push`: TriggerConditions?
+
+  /// Evaluated when a pull request is created.
+  `pullrequest-created`: TriggerConditions?
+
+  /// Evaluated when a pull request is updated.
+  `pullrequest-updated`: TriggerConditions?
+
+  /// Evaluated when a pull request is merged.
+  `pullrequest-fulfilled`: TriggerConditions?
+
+  /// Evaluated when a pull request is declined.
+  `pullrequest-rejected`: TriggerConditions?
+
+  /// Evaluated when a reviewer approves, requests changes on, or un-approves a pull request.
+  `pullrequest-reviewer-status-updated`: TriggerConditions?
+
+  /// Evaluated when a pipeline completes.
+  ///
+  /// A pipeline started by this trigger type does not itself re-trigger on completion, so simple
+  /// loops are impossible. Cycles through `deployment-completed` or
+  /// `package-artifact-created` are still possible — avoid them.
+  `pipeline-completed`: TriggerConditions?
+
+  /// Evaluated when a deployment completes.
+  `deployment-completed`: TriggerConditions?
+
+  /// Evaluated when a new artifact for a package is created.
+  ///
+  /// A pipeline started by this trigger type does not re-trigger on the artifacts it creates.
+  `package-artifact-created`: TriggerConditions?
+}
+
+/// The conditions for one trigger type. At most 20.
+typealias TriggerConditions = Listing<TriggerCondition>(!isEmpty, length <= 20)
+
+/// A condition and the pipelines to start when it holds.
+class TriggerCondition {
+  /// A boolean expression evaluated against the event.
+  ///
+  /// Reads `BITBUCKET_BRANCH`, `BITBUCKET_TAG`, `BITBUCKET_PR_ID`,
+  /// `BITBUCKET_PR_DESTINATION_BRANCH`, `BITBUCKET_PR_DESTINATION_COMMIT`, and all non-secure
+  /// workspace and repository variables. Write variables unquoted and string literals quoted;
+  /// all comparisons are case-sensitive.
+  ///
+  /// Supports `==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `||`, `!`, grouping, and three functions:
+  /// `glob(value, "pattern")` for pattern matching, `changesetInclude("pattern", …)` which is
+  /// true when any changed file matches a pattern, and `changesetExclude("pattern", …)` which is
+  /// true when any changed file does *not* match. As in
+  /// `BITBUCKET_BRANCH == "main" && changesetExclude("docs/**")`.
+  condition: String
+
+  /// Names of the pipelines to start in parallel, all of which must be defined under
+  /// [PipelineDefinitions.custom].
+  pipelines: Listing<String>(!isEmpty)
+}
+
+//---------------------------------------------------------------------------------------------
+// Definitions
+//---------------------------------------------------------------------------------------------
+
+/// Reusable resources referenced elsewhere in the configuration.
+class Definitions {
+  /// Custom caches, keyed by the name that [BaseStep.caches] refers to.
+  caches: Mapping<String, CacheDefinition>?
+
+  /// Service containers, keyed by the name that [BaseStep.services] refers to.
+  ///
+  /// The key `docker` configures the built-in Docker-in-Docker service.
+  services: Mapping<String, Service>?
+
+  /// Pipelines exported for import elsewhere, keyed by the name used in a [PipelineImport].
+  ///
+  /// Importing from another repository additionally requires [export] to be set on the file
+  /// holding these definitions.
+  ///
+  /// Bitbucket Premium only.
+  pipelines: Mapping<String, Pipeline>?
+
+  /// Sources that pipelines may be imported from, keyed by the name used in a [PipelineImport].
+  ///
+  /// A source is written as one of:
+  ///
+  /// - `<config-filepath>` — another file in this repository.
+  /// - `<repo-slug>:<branch-or-tag>` — the `bitbucket-pipelines.yml` of another repository.
+  /// - `<repo-slug>:<branch-or-tag>:<config-filepath>` — another file in another repository.
+  ///
+  /// A branch reference always resolves to its current head, so pin a tag when a build needs to
+  /// stay reproducible. At most 50 sources per file.
+  ///
+  /// Bitbucket Premium only.
+  imports: Mapping<String, String>(length <= 50)?
+}
+
+/// A cache: either a bare path, or a [Cache] whose contents are versioned by file checksum.
+typealias CacheDefinition = String | *Cache
+
+/// A cache of build dependencies, keyed on the contents of the files that determine them.
+///
+/// See [Cache dependencies](https://support.atlassian.com/bitbucket-cloud/docs/cache-dependencies/).
+class Cache {
+  /// What determines the version of the cache.
+  ///
+  /// Without this, the cache is versioned only by name, and stays in use until it is manually
+  /// cleared or expires.
+  key: CacheKey?
+
+  /// The directory to cache. May lie outside the repository and may use glob patterns.
+  path: String
+}
+
+/// The inputs that a cache's version is derived from.
+class CacheKey {
+  /// Files whose hashes determine the cache version — a lockfile, typically.
+  ///
+  /// A new cache is created whenever one of these changes. Glob patterns are supported.
+  files: Listing<String>(!isEmpty)
+}
+
+/// A container that runs alongside a step, such as a database.
+///
+/// The memory available to a step is shared between its script and its services.
+///
+/// See [Databases and service containers](https://support.atlassian.com/bitbucket-cloud/docs/databases-and-service-containers/).
+class Service {
+  /// The image to run.
+  image: Image?
+
+  /// The memory available to the container, in megabytes.
+  ///
+  /// From 128 to 4096, or up to 8192 in a `2x` step, drawn from the same budget as the step's
+  /// script. Defaults to 1024.
+  memory: Int(isBetween(128, 8192))?
+
+  /// Marks this as a Docker-in-Docker service, which is what lets a step run `docker` commands.
+  ///
+  /// Needed only to give the service a name other than `docker`, or to run more than one.
+  type: "docker"?
+
+  /// Environment variables for the container, typically its configuration.
+  ///
+  /// Pass credentials by referencing a repository or workspace variable, as in
+  /// `"$MY_DB_PASSWORD"`, rather than writing the value here.
+  variables: Mapping<String, String>?
+}
+
+//---------------------------------------------------------------------------------------------
+// Images
+//---------------------------------------------------------------------------------------------
+
+/// A Docker image: either a bare reference for a public image, or an [ImageSpec] when
+/// credentials or a user override are needed.
+typealias Image = String | *ImageSpec
+
+/// A Docker image together with the credentials needed to pull it.
+///
+/// See [Use Docker images as build environments](https://support.atlassian.com/bitbucket-cloud/docs/use-docker-images-as-build-environments/).
+class ImageSpec {
+  /// The image reference, as `<registry>/<repository>:<tag>`.
+  ///
+  /// Any public or private image reachable over the internet works; images on a private network
+  /// do not.
+  name: String
+
+  /// The registry username.
+  ///
+  /// Reference a repository or workspace variable, as in `"$DOCKER_REGISTRY_USERNAME"`, rather
+  /// than writing the value here.
+  username: String?
+
+  /// The registry password or token.
+  ///
+  /// Reference a secured repository or workspace variable, as in `"$DOCKER_REGISTRY_PASSWORD"`,
+  /// rather than writing the value here.
+  password: String?
+
+  /// The UID to run as, overriding the image's default user.
+  ///
+  /// Must already exist in the image and have a valid home directory. Defaults to 0, root.
+  `run-as-user`: Int?
+
+  /// Credentials for an image in Amazon Elastic Container Registry.
+  aws: AwsAuth?
+}
+
+/// How to authenticate to Amazon Elastic Container Registry.
+///
+/// Supply either [`access-key`] together with [`secret-key`], or [`oidc-role`] alone. Prefer the
+/// OIDC role: it needs no long-lived credentials in your configuration.
+///
+/// See [Private images hosted by AWS ECR](https://support.atlassian.com/bitbucket-cloud/docs/use-docker-images-as-build-environments/).
+class AwsAuth {
+  /// An AWS access key ID.
+  ///
+  /// Reference a repository or workspace variable, as in `"$AWS_ACCESS_KEY"`, rather than
+  /// writing the value here.
+  `access-key`: String?
+
+  /// The AWS secret access key matching [`access-key`].
+  ///
+  /// Reference a secured repository or workspace variable, as in `"$AWS_SECRET_KEY"`, rather
+  /// than writing the value here.
+  `secret-key`: String?
+
+  /// The ARN of the IAM role to assume by way of OpenID Connect, as
+  /// `arn:aws:iam::<account-id>:role/<role-name>`.
+  ///
+  /// The step must also set [BaseStep.oidc] to `true`.
+  `oidc-role`: String?(
+    if (this == null)
+      `access-key` != null && `secret-key` != null
+    else
+      `access-key` == null && `secret-key` == null
+  )
+}
+
+//---------------------------------------------------------------------------------------------
+// Clone
+//---------------------------------------------------------------------------------------------
+
+/// How the repository is cloned at the start of a step.
+open class Clone {
+  /// How many commits to fetch, or `"full"` for the entire history.
+  ///
+  /// Defaults to 50. A shallow clone is faster, but tools that read history — release-note
+  /// generators, `git describe`, some versioning plugins — need `"full"`.
+  depth: (Int(isPositive) | "full")?
+
+  /// Whether to clone at all. Defaults to `true`.
+  ///
+  /// Set `false` to skip the clone for steps that do not need the source, then re-enable it on
+  /// the steps that do.
+  enabled: Boolean?
+
+  /// Whether to download Git LFS files during the clone. Defaults to `false`.
+  ///
+  /// Prefer enabling this per step, or running `git lfs pull --include=<path>` for just the
+  /// files a step needs, rather than fetching every LFS object in every step.
+  lfs: Boolean?
+}
+
+/// How the repository is cloned for one step.
+class StepClone extends Clone {
+  /// Whether to skip SSL verification during the clone, permitting a self-signed certificate.
+  ///
+  /// Only honored on self-hosted runners. Defaults to `false`.
+  `skip-ssl-verify`: Boolean?
+}
+
+//---------------------------------------------------------------------------------------------
+// Global options and runtime
+//---------------------------------------------------------------------------------------------
+
+/// Settings applied to every pipeline in the repository.
+///
+/// See [Global options](https://support.atlassian.com/bitbucket-cloud/docs/global-options/).
+class GlobalOptions {
+  /// Whether to attach a Docker service to every step, letting any step run `docker` commands.
+  ///
+  /// Defaults to `false`. To enable it for one step instead, list `docker` in
+  /// [BaseStep.services].
+  docker: Boolean?
+
+  /// How long any step may run, in minutes, before it is timed out.
+  ///
+  /// Individual steps may override this. Defaults to 120.
+  `max-time`: MaxTime?
+
+  /// The compute resources allocated to every step.
+  size: Size?
+
+  /// The runtime environment for every step.
+  runtime: Runtime?
+}
+
+/// How long a step may run, in minutes: from 1 to 720.
+typealias MaxTime = Int(isBetween(1, 720))
+
+/// The compute resources allocated to a step.
+///
+/// `1x` gives 2 CPUs, 4 GB of memory, and a 64 GB volume; each step up doubles CPU and memory,
+/// and `4x` and above raise the volume to 256 GB and guarantee dedicated CPUs. Memory is shared
+/// between the step's script and its service containers.
+///
+/// A step consumes build minutes in proportion to its size, so a `4x` step costs four times what
+/// a `1x` step does. Sizes above `2x` require a Standard or Premium plan. Size has no effect on
+/// shell-based runners, which use everything the host has.
+typealias Size = "1x" | "2x" | "4x" | "8x" | "16x" | "24x" | "32x"
+
+/// The runtime environment for a step.
+class Runtime {
+  /// Runtime settings for steps running on Bitbucket Cloud infrastructure.
+  cloud: CloudRuntime
+}
+
+/// Runtime settings for steps running on Bitbucket Cloud infrastructure.
+class CloudRuntime {
+  /// Which runtime version to use.
+  ///
+  /// Version 3 relaxes the Docker restrictions of earlier runtimes: it permits `docker run
+  /// --privileged`, supports `docker buildx` for multi-architecture builds, and lets you supply
+  /// your own Docker CLI and Docker-in-Docker image. In exchange, the Docker CLI is no longer
+  /// mounted into the build container — include it in your image or install it in the step — and
+  /// the Pipelines Docker cache is ignored, so use Buildx caching instead.
+  ///
+  /// See [Enable and use Runtime v3](https://support.atlassian.com/bitbucket-cloud/docs/enable-and-use-runtime-v3/).
+  version: (Int(isBetween(2, 3)) | "2" | "3")?
+
+  /// Whether to route the step's ingress and egress traffic through Atlassian IP ranges rather
+  /// than the default AWS ranges.
+  ///
+  /// Defaults to `false`. Set this when the step must reach a service whose allowlist is written
+  /// in terms of Atlassian's published ranges.
+  `atlassian-ip-ranges`: Boolean?
+
+  /// Which CPU architecture to run the step on. Defaults to `x86`.
+  ///
+  /// `arm` requires a Standard or Premium plan.
+  arch: ("x86" | "arm")?
+}
+
+//---------------------------------------------------------------------------------------------
+// Shared constraints
+//---------------------------------------------------------------------------------------------
+
+/// A pipeline variable name: ASCII letters, digits, and underscores, not starting with a digit.
+typealias VariableName = String(matches(Regex(#"[A-Za-z_][A-Za-z0-9_]*"#)))
+
+output {
+  renderer = new YamlRenderer {
+    converters {
+      [PipelineElement] = (it) -> Map(it.__key__, it.__body__)
+    }
+  }
+}
