@@ -1,0 +1,120 @@
+/// Private registries, service containers, and Runtime v3 for multi-architecture Docker builds.
+module com.atlassian.bitbucket.pipelines.examples.private_images_and_services
+
+amends "../Config.pkl"
+
+/// The build image lives in a private ECR repository, pulled with a short-lived OIDC role rather
+/// than a stored access key.
+image = new ImageSpec {
+  name = "0123456789012.dkr.ecr.us-west-2.amazonaws.com/build-base:2024.11"
+  aws {
+    `oidc-role` = "arn:aws:iam::0123456789012:role/bitbucket-pipelines"
+  }
+}
+
+options {
+  size = "2x"
+}
+
+definitions {
+  caches {
+    // Shorthand form: a bare path, versioned only by name.
+    ["gradle-wrapper"] = "~/.gradle/wrapper"
+
+    // Keyed form: a new cache is created whenever the lockfile changes.
+    ["gradle-deps"] = new Cache {
+      key {
+        files {
+          "gradle/verification-metadata.xml"
+          "**/*.gradle.kts"
+        }
+      }
+      path = "~/.gradle/caches"
+    }
+  }
+
+  services {
+    ["postgres"] = new Service {
+      image = "postgres:18"
+      memory = 1024
+      variables {
+        ["POSTGRES_DB"] = "test"
+        ["POSTGRES_PASSWORD"] = "$POSTGRES_PASSWORD"
+      }
+    }
+
+    // Pinning the Docker-in-Docker image is only possible under Runtime v3.
+    ["docker"] = new Service {
+      image = "docker:28-dind"
+      type = "docker"
+      memory = 3072
+    }
+  }
+}
+
+pipelines {
+  `default` {
+    new Step {
+      name = "Test against Postgres"
+      caches {
+        "gradle-wrapper"
+        "gradle-deps"
+      }
+      services { "postgres" }
+      script {
+        "./gradlew test"
+      }
+      artifacts = new ArtifactsSpec {
+        upload {
+          new ArtifactUpload {
+            name = "junit"
+            type = "test-reports"
+            paths { "build/test-results/test/*.xml" }
+          }
+          new ArtifactUpload {
+            name = "test logs"
+            type = "scoped"
+            paths { "build/reports/**" }
+            `capture-on` = "failed"
+          }
+        }
+      }
+    }
+
+    new Step {
+      name = "Build multi-arch image"
+      // Runtime v3 is what enables buildx and privileged containers. It does not mount a Docker
+      // CLI, so the image above must ship one.
+      runtime {
+        cloud {
+          version = 3
+          arch = "arm"
+        }
+      }
+      size = "4x"
+      oidc = true
+      services { "docker" }
+      script {
+        "docker buildx create --name multiarch --driver docker-container --use"
+        "docker run --rm --privileged tonistiigi/binfmt --install all"
+        "docker buildx build --platform linux/amd64,linux/arm64 -t app:$BITBUCKET_COMMIT ."
+      }
+    }
+
+    new Step {
+      name = "Publish from a self-hosted runner"
+      `runs-on` {
+        "self.hosted"
+        "linux"
+      }
+      // The internal registry uses a certificate the runner does not trust.
+      clone {
+        `skip-ssl-verify` = true
+        depth = 1
+      }
+      script {
+        "./publish-internal.sh"
+      }
+    }
+  }
+}

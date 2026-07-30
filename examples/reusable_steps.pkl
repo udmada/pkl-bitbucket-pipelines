@@ -1,0 +1,55 @@
+/// Reusing step definitions without YAML anchors.
+///
+/// In hand-written YAML this would need `definitions.steps` plus an anchor per reusable step,
+/// and every use would be an all-or-nothing copy. Here a `local` function returns a step, so
+/// each use can be parameterized.
+module com.atlassian.bitbucket.pipelines.examples.reusable_steps
+
+amends "../Config.pkl"
+
+/// A test step for one shard of the suite.
+local function testShard(shard: Int, of: Int): Step = new {
+  name = "Test \(shard)/\(of)"
+  caches { "node" }
+  script {
+    "npm ci"
+    "npm test -- --shard=\(shard)/\(of)"
+  }
+}
+
+/// The build step, parameterized by the mode to build in.
+local function buildStep(mode: String): Step = new {
+  name = "Build (\(mode))"
+  caches { "node" }
+  script {
+    "npm ci"
+    "npm run build -- --mode=\(mode)"
+  }
+  artifacts { "dist/**" }
+}
+
+image = "node:24"
+
+pipelines {
+  `default` {
+    buildStep("development")
+    new Parallel {
+      steps {
+        testShard(1, 3)
+        testShard(2, 3)
+        testShard(3, 3)
+      }
+    }
+  }
+  branches {
+    ["main"] {
+      // Amending a step overrides individual properties. Note that amending a `Listing` — such
+      // as `script` — *appends* to it; assign `script = new { … }` to replace it outright.
+      (buildStep("production")) {
+        size = "2x"
+        `max-time` = 30
+      }
+      testShard(1, 1)
+    }
+  }
+}

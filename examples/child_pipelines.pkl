@@ -1,0 +1,91 @@
+/// A parent pipeline that delegates work to child pipelines.
+///
+/// A `type: pipeline` step triggers another custom pipeline rather than running commands itself,
+/// which keeps each pipeline small and lifts the 100-step ceiling that would otherwise apply to
+/// one flat pipeline. Artifacts and variables are the only things that cross the boundary.
+module com.atlassian.bitbucket.pipelines.examples.child_pipelines
+
+amends "../Config.pkl"
+
+image = "node:24"
+
+pipelines {
+  custom {
+    ["release"] {
+      new Variables {
+        variables {
+          new CustomVariable {
+            name = "release_channel"
+            `default` = "beta"
+            `allowed-values` {
+              "beta"
+              "stable"
+            }
+            description = "Which channel to publish this release to"
+          }
+        }
+      }
+
+      new Step {
+        name = "Build"
+        script {
+          "npm ci"
+          "npm run build"
+        }
+        artifacts = new ArtifactsSpec {
+          upload {
+            new ArtifactUpload {
+              name = "bundle"
+              paths { "dist/**" }
+            }
+          }
+        }
+      }
+
+      // Hands `bundle` into the child pipeline, and takes the child's `signatures` back out.
+      new ChildPipelineStep {
+        name = "Sign and publish"
+        custom = "sign-and-publish"
+        `input-variables` {
+          ["channel"] = "$release_channel"
+          ["commit"] = "$BITBUCKET_COMMIT"
+        }
+        artifacts {
+          upload { "bundle" }
+          download { "signatures" }
+        }
+      }
+
+      new Step {
+        name = "Record release"
+        script {
+          "./record-release.sh --channel \"$release_channel\" --signatures signatures/"
+        }
+      }
+    }
+
+    ["sign-and-publish"] {
+      new Step {
+        name = "Sign"
+        oidc = true
+        script {
+          "./sign.sh dist/ --out signatures/"
+        }
+        artifacts = new ArtifactsSpec {
+          upload {
+            new ArtifactUpload {
+              name = "signatures"
+              paths { "signatures/**" }
+            }
+          }
+        }
+      }
+      new Step {
+        name = "Publish"
+        script {
+          "npm publish --tag \"$channel\""
+        }
+      }
+    }
+  }
+}

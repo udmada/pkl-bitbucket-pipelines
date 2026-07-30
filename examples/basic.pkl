@@ -1,0 +1,23 @@
+/// A minimal pipeline: install, test, build, and keep the build output.
+module com.atlassian.bitbucket.pipelines.examples.basic
+
+amends "../Config.pkl"
+
+image = "node:24"
+
+pipelines {
+  `default` {
+    new Step {
+      name = "Build and test"
+      caches { "node" }
+      script {
+        "npm ci"
+        "npm test"
+        "npm run build"
+      }
+      artifacts {
+        "dist/**"
+      }
+    }
+  }
+}

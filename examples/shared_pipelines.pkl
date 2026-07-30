@@ -1,0 +1,61 @@
+/// Importing a pipeline definition shared by another repository, and exporting one of your own.
+///
+/// Bitbucket Premium only. Note that Pkl offers a second, often better answer to the same
+/// problem: publish this package's schema plus your own step library as a Pkl package and
+/// `import` it, which is checked at evaluation time rather than when the pipeline runs.
+module com.atlassian.bitbucket.pipelines.examples.shared_pipelines
+
+amends "../Config.pkl"
+
+/// Lets other repositories in the workspace import the pipelines under `definitions.pipelines`.
+export = true
+
+definitions {
+  imports {
+    // Another file in this repository — just a path.
+    ["local-shared"] = ".bitbucket/shared-pipelines.yml"
+
+    // The `bitbucket-pipelines.yml` of another repository, pinned to a tag so that the imported
+    // definition cannot change underneath us. A branch reference would always resolve to its
+    // current head.
+    ["platform"] = "platform-pipelines:v2.4.0"
+
+    // A specific file in another repository.
+    ["platform-deploy"] = "platform-pipelines:v2.4.0:.bitbucket/deploy.yml"
+  }
+
+  // Exported for other repositories to import. Contains no secrets: once `export` is set, assume
+  // every repository in the workspace can read this file.
+  pipelines {
+    ["lint"] {
+      new Step {
+        name = "Lint"
+        image = "golangci/golangci-lint:latest"
+        script { "golangci-lint run ./..." }
+      }
+    }
+  }
+}
+
+pipelines {
+  `default` {
+    new Step {
+      name = "Test"
+      image = "golang:1.26"
+      script { "go test ./..." }
+    }
+  }
+
+  branches {
+    // A whole pipeline supplied by the platform repository.
+    ["main"] = new PipelineImport {
+      `import` = "standard-release@platform"
+    }
+  }
+
+  custom {
+    ["deploy"] = new PipelineImport {
+      `import` = "deploy@platform-deploy"
+    }
+  }
+}

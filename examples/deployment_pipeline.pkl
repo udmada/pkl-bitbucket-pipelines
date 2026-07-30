@@ -1,0 +1,110 @@
+/// Build once, then promote through staging and production using deployment stages.
+///
+/// Each stage holds a lock on its environment for the duration of every step it contains, so the
+/// deploy and its smoke test cannot be interleaved with another pipeline's deploy. Production is
+/// gated behind a manual trigger, and a final step reports the outcome either way.
+module com.atlassian.bitbucket.pipelines.examples.deployment_pipeline
+
+amends "../Config.pkl"
+
+image = "python:3.14"
+
+options {
+  `max-time` = 45
+}
+
+clone {
+  depth = 50
+}
+
+definitions {
+  caches {
+    ["pip-lockfile"] = new Cache {
+      key {
+        files {
+          "requirements.lock"
+        }
+      }
+      path = ".venv"
+    }
+  }
+}
+
+pipelines {
+  branches {
+    ["main"] {
+      new Step {
+        name = "Build"
+        caches { "pip-lockfile" }
+        script {
+          "python -m venv .venv"
+          ".venv/bin/pip install -r requirements.lock"
+          ".venv/bin/python -m build"
+        }
+        artifacts = new ArtifactsSpec {
+          upload {
+            new ArtifactUpload {
+              name = "wheels"
+              paths { "dist/*.whl" }
+            }
+          }
+        }
+      }
+
+      new Stage {
+        name = "Deploy to staging"
+        deployment = "staging"
+        steps {
+          new Step {
+            name = "Deploy"
+            script { "./deploy.sh staging" }
+          }
+          new Step {
+            name = "Smoke test"
+            // Flaky against a freshly rolled deployment; give it a couple of retries.
+            `on-fail` {
+              strategy = "retry"
+              maxRetryCount = 3
+            }
+            script { "./smoke-test.sh https://staging.example.com" }
+          }
+        }
+      }
+
+      new Stage {
+        name = "Deploy to production"
+        deployment = "production"
+        trigger = "manual"
+        condition {
+          state = "production_deploys_enabled == true"
+        }
+        steps {
+          new Step {
+            name = "Deploy"
+            oidc = true
+            script {
+              "./deploy.sh production"
+            }
+          }
+          new Step {
+            name = "Smoke test"
+            script { "./smoke-test.sh https://example.com" }
+          }
+        }
+      }
+
+      new FinalStep {
+        name = "Report outcome"
+        script {
+          new Pipe {
+            pipe = "atlassian/slack-notify:2.3.1"
+            variables {
+              ["WEBHOOK_URL"] = "$SLACK_WEBHOOK"
+              ["MESSAGE"] = "Deploy of $BITBUCKET_COMMIT finished with code $BITBUCKET_EXIT_CODE"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+/// A monorepo that builds only the services whose files changed.
+///
+/// Each service gets a custom pipeline, and `triggers` starts every pipeline whose changeset
+/// matches — in parallel, and independently of one another. This is what `triggers` buys over
+/// `branches`: with a branch pipeline only the first match runs, so a commit touching two
+/// services would have to run one monolithic pipeline covering both.
+module com.atlassian.bitbucket.pipelines.examples.monorepo_triggers
+
+amends "../Config.pkl"
+
+/// The services in the repository, each rooted at `services/<name>`.
+local services = List("api", "web", "worker")
+
+// The parameter is deliberately not called `name`: inside `new Step { … }`, `name` would resolve
+// to the step's own `name` property rather than to the parameter.
+local function buildService(service: String): Step = new {
+  name = "Build \(service)"
+  image = "golang:1.26"
+  caches { "go" }
+  script {
+    "cd services/\(service)"
+    "go build ./..."
+    "go test ./..."
+  }
+}
+
+pipelines {
+  custom {
+    for (service in services) {
+      ["build-\(service)"] {
+        buildService(service)
+      }
+    }
+
+    // Runs on any change outside the services, such as shared tooling.
+    ["build-all"] {
+      new Parallel {
+        `fail-fast` = true
+        steps {
+          for (service in services) {
+            buildService(service)
+          }
+        }
+      }
+    }
+  }
+}
+
+triggers {
+  `repository-push` {
+    for (service in services) {
+      new TriggerCondition {
+        condition = #"BITBUCKET_BRANCH == "main" && changesetInclude("services/\#(service)/**")"#
+        pipelines { "build-\(service)" }
+      }
+    }
+    new TriggerCondition {
+      condition = #"BITBUCKET_BRANCH == "main" && changesetInclude("Makefile", "go.work", ".bitbucket/**")"#
+      pipelines { "build-all" }
+    }
+  }
+  `pullrequest-push` {
+    new TriggerCondition {
+      // Skip CI entirely when a pull request only touches documentation.
+      condition = #"changesetExclude("docs/**", "*.md")"#
+      pipelines { "build-all" }
+    }
+  }
+}
