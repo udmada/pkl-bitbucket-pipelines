@@ -1,0 +1,21 @@
+[tools]
+pkl = "latest"
+
+[tasks."pkl:gen"]
+description = "Generate GitHub Actions YAML from pkl sources"
+run = "pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl"
+
+[tasks.test]
+description = "Run the schema snapshot tests"
+run = "pkl test tests/Config.pkl"
+
+[tasks."test:record"]
+description = "Re-record the snapshot tests after an intended schema change"
+run = "pkl test --overwrite tests/Config.pkl"
+
+[tasks.package]
+description = "Build the publishable package into .out/"
+run = "pkl project package"
+
+# Note: there is no `doc` task. The native `pkl` CLI has no `doc` subcommand — pkldoc ships only
+# with the JVM distribution. `doc-package-info.pkl` is kept for whoever generates docs with it.

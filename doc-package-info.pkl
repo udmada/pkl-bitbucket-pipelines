@@ -1,0 +1,19 @@
+/// Write Bitbucket Pipelines configuration with Pkl.
+///
+/// Consumed by `pkl doc` to title and link the generated documentation.
+amends "pkl:DocPackageInfo"
+
+name = "com.atlassian.bitbucket.pipelines"
+
+version = "1.0.0"
+
+importUri =
+  "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/\(name)@\(version)/"
+
+sourceCode = "https://github.com/udmada/pkl-bitbucket-pipelines"
+
+issueTracker = "https://github.com/udmada/pkl-bitbucket-pipelines/issues"
+
+authors {
+  "udmada <git@adamdu.nz>"
+}

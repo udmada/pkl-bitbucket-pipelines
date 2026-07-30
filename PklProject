@@ -1,0 +1,45 @@
+/// Templates for defining [Bitbucket Pipelines](https://bitbucket.org/product/features/pipelines)
+/// configuration.
+amends "pkl:Project"
+
+/// Where this package is published from.
+///
+/// [package.baseUri] must keep the `pkg.pkl-lang.org/github.com/<owner>/<repo>` shape: that host
+/// is a redirector which rewrites a package URI to
+/// `https://github.com/<owner>/<repo>/releases/download/<name>@<version>/…`. It only understands
+/// `github.com` paths, so a package released anywhere else needs a `baseUri` on a host you serve
+/// the metadata from yourself.
+local owner = "udmada"
+
+local repo = "pkl-bitbucket-pipelines"
+
+local repository = "https://github.com/\(owner)/\(repo)"
+
+package {
+  name = "com.atlassian.bitbucket.pipelines"
+  version = "1.0.0"
+  baseUri = "package://pkg.pkl-lang.org/github.com/\(owner)/\(repo)/\(name)"
+  packageZipUrl = "\(repository)/releases/download/\(name)@\(version)/\(name)@\(version).zip"
+  description = "Schema for Bitbucket Pipelines `bitbucket-pipelines.yml` files."
+  authors {
+    "udmada <git@adamdu.nz>"
+  }
+  license = "Apache-2.0"
+  website = repository
+  sourceCode = "\(repository)/tree/\(name)@\(version)"
+  sourceCodeUrlScheme = "\(repository)/blob/\(name)@\(version)%{path}#L%{line}-%{endLine}"
+  issueTracker = "\(repository)/issues"
+  apiTests = tests
+  exclude {
+    "LICENSE"
+    "*.md"
+    "*.toml"
+    ".gitignore"
+    ".github/**"
+    "assets/**"
+    "examples/**"
+    "tests/**"
+  }
+}
+
+tests = import*("tests/**.pkl").keys.toListing()
