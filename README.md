@@ -174,18 +174,25 @@ generated YAML — CI fails if the two disagree.
 ### API documentation
 
 The [Docs workflow](.github/pkl/docs.pkl) publishes pkldoc output to GitHub Pages on every push to
-`master`. Note that pkldoc is **not** part of the native `pkl` CLI, which has no `doc` subcommand —
-it lives in the JVM `pkl-tools` jar, so the workflow fetches that from Maven Central pinned to the
-same version the rest of CI uses. To generate the docs locally:
+`master`, by running the same task you can run locally:
 
 ```console
-curl -sSLf -o /tmp/pkl-tools.jar \
-  https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/0.32.1/pkl-tools-0.32.1.jar
-java -cp /tmp/pkl-tools.jar org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+mise run doc
 ```
 
-`doc-package-info.pkl` must be passed alongside the modules — pkldoc refuses to run without it,
-and it supplies the package name, version, and import URI the pages are built around.
+pkldoc is **not** part of the native `pkl` CLI, which has no `doc` subcommand — it lives in the JVM
+`pkl-tools` jar, which mise cannot install as a tool. The `doc` task therefore fetches the jar
+itself, pinned to whatever `pkl --version` reports, so the documentation generator and the language
+version can never disagree and no version is written down twice. `java` comes from `mise.toml`
+alongside `pkl`, which is why the workflows need no `setup-java` step.
+
+`doc-package-info.pkl` must be passed alongside the modules — pkldoc refuses to run without it, and
+it supplies the package name, version, and import URI the pages are built around.
+
+Pages must be enabled once, under **Settings → Pages → Build and deployment**, with **Source** set
+to **GitHub Actions**. That source deploys the artifact the workflow uploads, so there is no branch
+or folder to choose — the branch/folder selectors belong to the older "Deploy from a branch" source,
+which this setup does not use.
 
 ## Releasing
 
@@ -208,14 +215,34 @@ emits.
 
 To cut a release:
 
-1. Bump `package.version` in [`PklProject`](PklProject) and `version` in
-   [`doc-package-info.pkl`](doc-package-info.pkl).
-2. Commit, then tag and push:
+1. Bump every version string at once, and confirm nothing drifted:
 
    ```console
-   git tag com.atlassian.bitbucket.pipelines@1.0.1
-   git push origin com.atlassian.bitbucket.pipelines@1.0.1
+   mise run version:set 1.2.3
+   mise run test
    ```
+
+2. Commit, then tag and push. The tag must match `package.version` exactly — the Release workflow
+   refuses to publish if it doesn't:
+
+   ```console
+   git tag "com.atlassian.bitbucket.pipelines@$VERSION"
+   git push origin "com.atlassian.bitbucket.pipelines@$VERSION"
+   ```
+
+### Keeping versions aligned
+
+`PklProject` is the single source of truth for the package version. Everything that can be derived
+from it, is: [`doc-package-info.pkl`](doc-package-info.pkl) imports it, so its `version` and
+`importUri` are computed rather than copied.
+
+Prose cannot be computed, so the install snippets in this README and the usage example in
+`Config.pkl` are instead *checked*: [`tests/Version.pkl`](tests/Version.pkl) asserts that every
+`com.atlassian.bitbucket.pipelines@<version>` reference equals `package.version`, and that the
+`pkl-tools` jar URL matches the pkl version CI installs. A stale reference fails the build rather
+than pointing users at a package that was never published.
+
+`mise run version:set <version>` rewrites all of them together.
 
 The [Release workflow](.github/pkl/release.pkl) packages the module, verifies the tag matches
 `package.version`, and publishes the artifacts to a GitHub release.
