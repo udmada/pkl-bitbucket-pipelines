@@ -1,0 +1,27 @@
+# Generated from Workflow.pkl. DO NOT EDIT.
+name: CI
+'on':
+  pull_request: {}
+  push:
+    branches:
+    - master
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      with:
+        fetch-depth: 1
+    - uses: pkl-community/setup-pkl@0bffd1602015ccf46333e880f81087e73fd1a361 # v0
+      with:
+        pkl-version: 0.32.1
+    - name: Check the schema evaluates
+      run: pkl eval examples/basic.pkl
+    - name: Run snapshot tests
+      run: pkl test tests/Config.pkl
+    - name: Check the package builds
+      run: pkl project package
+    - name: Verify generated workflows are up to date
+      run: |-
+        pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl
+        git diff --exit-code .github/

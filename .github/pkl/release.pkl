@@ -1,0 +1,57 @@
+amends "@com.github.actions/Workflow.pkl"
+
+import "@com.github.actions/Step.pkl"
+
+import "common.pkl"
+import "actions/GhReleaseAction.pkl"
+
+name = "Release"
+
+// The tag name is load-bearing. `pkg.pkl-lang.org` resolves a package URI by redirecting to
+// `https://github.com/<owner>/<repo>/releases/download/<name>@<version>/<name>@<version>`, so a
+// release is only importable if it is tagged exactly `<name>@<version>` and carries the four
+// artifacts `pkl project package` writes.
+on {
+  push {
+    tags { "\(common.packageName)@*" }
+  }
+}
+
+permissions {
+  contents = "write"
+}
+
+jobs {
+  ["release"] {
+    `runs-on` = "ubuntu-latest"
+    steps = (common.steps) {
+      (Step) {
+        name = "Package the module"
+        run = "pkl project package"
+      }
+      (Step) {
+        // `pkl project package` writes to `.out/<name>@<version>/`, taking the version from
+        // PklProject rather than from the tag. If someone tags a release without bumping
+        // PklProject, that directory will not exist — fail here rather than publish a release
+        // whose assets do not match its tag.
+        name = "Check the tag matches the version in PklProject"
+        run = """
+          if [ ! -d ".out/$GITHUB_REF_NAME" ]; then
+            echo "Tag '$GITHUB_REF_NAME' does not match package.name@package.version in PklProject." >&2
+            echo "Built instead:" >&2
+            ls -1 .out >&2
+            exit 1
+          fi
+          """
+      }
+      (GhReleaseAction) {
+        name = "Publish the release"
+        with {
+          files = ".out/${{ github.ref_name }}/*"
+          `fail_on_unmatched_files` = true
+          generate_release_notes = true
+        }
+      }
+    }
+  }
+}

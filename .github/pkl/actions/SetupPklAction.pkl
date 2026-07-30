@@ -1,0 +1,17 @@
+// Converted from https://github.com/pkl-community/setup-pkl/blob/main/action.yml
+module pkl.community.`setup-pkl`.v0.SetupPklAction
+
+extends "@com.github.actions/AbstractTypedStep.pkl"
+
+fixed action: "pkl-community/setup-pkl"
+
+fixed version: "v0"
+
+with: With
+
+class With {
+  /// The version of pkl to install, such as `0.32.1`.
+  ///
+  /// Keep this in step with `minPklVersion` in the schema module.
+  `pkl-version`: String
+}

@@ -1,0 +1,26 @@
+import "@com.github.actions/AbstractTypedStep.pkl"
+import "@com.github.actions/catalog.pkl"
+import "@com.github.actions/Step.pkl"
+
+import "actions/SetupPklAction.pkl"
+
+/// The version of pkl every workflow runs, kept in one place so CI and Release cannot drift.
+const pklVersion = "0.32.1"
+
+/// The published package name. Must match `package.name` in the root `PklProject`, since the
+/// release workflow triggers on `<packageName>@*` tags.
+const packageName = "com.atlassian.bitbucket.pipelines"
+
+/// Check out the repository and install pkl. Every job here needs both and nothing else.
+steps: Listing<*Step | AbstractTypedStep> = new Listing {
+  (catalog.`actions/checkout@v6`) {
+    with {
+      `fetch-depth` = 1
+    }
+  }
+  (SetupPklAction) {
+    with {
+      `pkl-version` = pklVersion
+    }
+  }
+}

@@ -1,0 +1,35 @@
+// Converted from https://github.com/softprops/action-gh-release/blob/master/action.yml
+module softprops.`action-gh-release`.v2.GhReleaseAction
+
+extends "@com.github.actions/AbstractTypedStep.pkl"
+
+fixed action: "softprops/action-gh-release"
+
+fixed version: "v2"
+
+with: With
+
+class With {
+  /// Newline-delimited globs of paths to upload as release assets.
+  files: String?
+
+  /// Whether to fail the run when a glob in [files] matches nothing.
+  ///
+  /// Worth setting: without it, a rename or a failed build silently publishes an empty release.
+  `fail_on_unmatched_files`: Boolean?
+
+  /// The release name. Defaults to the tag.
+  name: String?
+
+  /// Whether to publish as a draft rather than a public release.
+  draft: Boolean?
+
+  /// Whether to mark the release as a prerelease.
+  prerelease: Boolean?
+
+  /// Whether to generate release notes from the commits since the previous tag.
+  generate_release_notes: Boolean?
+
+  /// Body text for the release.
+  body: String?
+}

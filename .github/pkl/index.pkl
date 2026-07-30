@@ -1,0 +1,17 @@
+/// Generates `.github/workflows/*.yml` and `.github/dependabot.yml`.
+///
+/// Actions are pinned to git SHAs recorded in `workflows/__lockfile__.yml`, which dependabot keeps
+/// current. Regenerate with `mise run pkl:gen`.
+amends "@pkl.github.dependabotManagedActions/DependabotManagedActions.pkl"
+
+workflows {
+  ["workflows/ci.yml"] = import("ci.pkl")
+  ["workflows/release.yml"] = import("release.pkl")
+}
+
+// Dependabot has no ecosystem for Pkl packages, so the only updater here is the `github-actions`
+// one that the template appends automatically. Bumping the pkl-pantry dependencies in
+// `.github/pkl/PklProject` is a manual job.
+dependabot {
+  updates {}
+}

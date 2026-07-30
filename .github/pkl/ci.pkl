@@ -1,0 +1,44 @@
+amends "@com.github.actions/Workflow.pkl"
+
+import "@com.github.actions/Step.pkl"
+
+import "common.pkl"
+
+name = "CI"
+
+on {
+  push {
+    branches { "master" }
+  }
+  pull_request {}
+}
+
+jobs {
+  ["test"] {
+    `runs-on` = "ubuntu-latest"
+    steps = (common.steps) {
+      (Step) {
+        name = "Check the schema evaluates"
+        // The schema module on its own is deliberately invalid — a config with no pipelines is
+        // not a pipeline — so evaluate an example instead.
+        run = "pkl eval examples/basic.pkl"
+      }
+      (Step) {
+        name = "Run snapshot tests"
+        run = "pkl test tests/Config.pkl"
+      }
+      (Step) {
+        name = "Check the package builds"
+        run = "pkl project package"
+      }
+      (Step) {
+        // Same command as the `pkl:gen` mise task, spelled out so the runner needs only pkl.
+        name = "Verify generated workflows are up to date"
+        run = """
+          pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl
+          git diff --exit-code .github/
+          """
+      }
+    }
+  }
+}
