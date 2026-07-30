@@ -27,7 +27,7 @@ jobs {
     steps = (common.steps) {
       (Step) {
         name = "Package the module"
-        run = "pkl project package"
+        run = "mise run package"
       }
       (Step) {
         // `pkl project package` writes to `.out/<name>@<version>/`, taking the version from

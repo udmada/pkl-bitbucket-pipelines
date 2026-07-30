@@ -18,24 +18,25 @@ jobs {
     `runs-on` = "ubuntu-latest"
     steps = (common.steps) {
       (Step) {
+        // The schema module on its own is deliberately invalid — a config with no pipelines is not
+        // a pipeline — so evaluate an example instead.
         name = "Check the schema evaluates"
-        // The schema module on its own is deliberately invalid — a config with no pipelines is
-        // not a pipeline — so evaluate an example instead.
         run = "pkl eval examples/basic.pkl"
       }
       (Step) {
-        name = "Run snapshot tests"
-        run = "pkl test tests/Config.pkl"
+        name = "Run tests"
+        run = "mise run test"
       }
       (Step) {
+        // Deliberately the lenient variant: the strict check fails for any content change once a
+        // version is published, which would block every push until the version is bumped.
         name = "Check the package builds"
-        run = "pkl project package"
+        run = "mise run package:verify"
       }
       (Step) {
-        // Same command as the `pkl:gen` mise task, spelled out so the runner needs only pkl.
         name = "Verify generated workflows are up to date"
         run = """
-          pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl
+          mise run pkl:gen
           git diff --exit-code .github/
           """
       }

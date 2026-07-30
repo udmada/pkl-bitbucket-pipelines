@@ -10,16 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with: {}
-    - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
       with:
-        java-version: '25'
-        distribution: temurin
+        fetch-depth: 1
+    - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4
+      with: {}
     - name: Generate pkldoc
-      run: |-
-        curl -sSLf -o /tmp/pkl-tools.jar \
-          "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/0.32.1/pkl-tools-0.32.1.jar"
-        java -cp /tmp/pkl-tools.jar org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+      run: mise run doc
     - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
       with:
         path: .out/doc

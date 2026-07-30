@@ -1,17 +1,16 @@
 /// Publishes pkldoc-generated API documentation to GitHub Pages.
 ///
-/// pkldoc is not part of the native `pkl` CLI — that has no `doc` subcommand — so this fetches the
-/// `pkl-tools` fat jar from Maven Central, which bundles `org.pkl.doc.Main` along with everything
-/// it needs. Pinning it to the same version the rest of CI uses keeps the docs in step with the
-/// language version the schema is checked against.
+/// The generation itself is the `doc` task in `mise.toml`, which fetches the JVM `pkl-tools` jar
+/// because the native pkl CLI has no `doc` subcommand. Keeping it there rather than inline means the
+/// command is identical locally and in CI, and java comes from `mise.toml` along with pkl.
 ///
 /// Requires Pages to be enabled for the repository with "Source" set to "GitHub Actions".
 amends "@com.github.actions/Workflow.pkl"
 
 import "@com.github.actions/catalog.pkl"
+import "@com.github.actions/Step.pkl"
 
 import "common.pkl"
-import "actions/CheckoutAction.pkl"
 
 name = "Docs"
 
@@ -25,24 +24,10 @@ on {
 jobs {
   ["generate"] {
     `runs-on` = "ubuntu-latest"
-    steps {
-      CheckoutAction
-      // `actions/setup-java` has no v6; v5 is the current major.
-      (catalog.`actions/setup-java@v5`) {
-        with {
-          distribution = "temurin"
-          `java-version` = "25"
-        }
-      }
-      new {
-        // pkldoc requires `doc-package-info.pkl` among its source modules — it supplies the
-        // package name, version, and import URI that the generated pages are built around.
+    steps = (common.steps) {
+      (Step) {
         name = "Generate pkldoc"
-        run = """
-          curl -sSLf -o /tmp/pkl-tools.jar \\
-            "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/\(common.pklVersion)/pkl-tools-\(common.pklVersion).jar"
-          java -cp /tmp/pkl-tools.jar org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
-          """
+        run = "mise run doc"
       }
       (catalog.`actions/upload-pages-artifact@v5`) {
         with {

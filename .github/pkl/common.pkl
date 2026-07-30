@@ -2,25 +2,22 @@ import "@com.github.actions/AbstractTypedStep.pkl"
 import "@com.github.actions/Step.pkl"
 
 import "actions/CheckoutAction.pkl"
-import "actions/SetupPklAction.pkl"
-
-/// The version of pkl every workflow runs, kept in one place so CI and Release cannot drift.
-const pklVersion = "0.32.1"
+import "actions/MiseAction.pkl"
 
 /// The published package name. Must match `package.name` in the root `PklProject`, since the
 /// release workflow triggers on `<packageName>@*` tags.
 const packageName = "com.atlassian.bitbucket.pipelines"
 
-/// Check out the repository and install pkl. Every job here needs both and nothing else.
+/// Check out the repository and install the toolchain declared in `mise.toml`.
+///
+/// mise provides both pkl and java, so no `setup-pkl` or `setup-java` step is needed, and every
+/// job can call the same `mise run` tasks used locally.
 steps: Listing<*Step | AbstractTypedStep> = new Listing {
   (CheckoutAction) {
     with {
       `fetch-depth` = 1
     }
   }
-  (SetupPklAction) {
-    with {
-      `pkl-version` = pklVersion
-    }
-  }
+  // Installs whatever `mise.toml` declares — the tool versions live there, not here.
+  MiseAction
 }
