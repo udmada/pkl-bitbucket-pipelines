@@ -17,7 +17,7 @@ local repository = "https://github.com/\(owner)/\(repo)"
 
 package {
   name = "com.atlassian.bitbucket.pipelines"
-  version = "1.0.0"
+  version = "1.1.0"
   baseUri = "package://pkg.pkl-lang.org/github.com/\(owner)/\(repo)/\(name)"
   packageZipUrl = "\(repository)/releases/download/\(name)@\(version)/\(name)@\(version).zip"
   description = "Schema for Bitbucket Pipelines `bitbucket-pipelines.yml` files."
