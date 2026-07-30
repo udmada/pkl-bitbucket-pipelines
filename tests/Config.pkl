@@ -1,0 +1,18 @@
+/// Snapshot tests: every example under `examples/` is rendered to YAML and compared against
+/// `Config.pkl-expected.pcf`.
+///
+/// Run with `pkl test tests/Config.pkl`, and re-record with `--overwrite` after an intended
+/// change to the schema or the examples.
+module com.atlassian.bitbucket.pipelines.tests.Config
+
+amends "pkl:test"
+
+local allExamples = import*("../examples/*.pkl")
+
+examples {
+  for (example in allExamples.keys) {
+    [example.drop("../examples/".length).replaceLast("pkl", "yaml")] {
+      allExamples[example].output.text
+    }
+  }
+}

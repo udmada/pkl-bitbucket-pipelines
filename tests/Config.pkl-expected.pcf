@@ -1,0 +1,402 @@
+examples {
+  ["basic.yaml"] {
+    """
+    image: node:24
+    pipelines:
+      default:
+      - step:
+          name: Build and test
+          script:
+          - npm ci
+          - npm test
+          - npm run build
+          caches:
+          - node
+          artifacts:
+          - dist/**
+    
+    """
+  }
+  ["child_pipelines.yaml"] {
+    """
+    image: node:24
+    pipelines:
+      custom:
+        release:
+        - variables:
+          - name: release_channel
+            default: beta
+            allowed-values:
+            - beta
+            - stable
+            description: Which channel to publish this release to
+        - step:
+            name: Build
+            script:
+            - npm ci
+            - npm run build
+            artifacts:
+              upload:
+              - name: bundle
+                paths:
+                - dist/**
+        - step:
+            name: Sign and publish
+            type: pipeline
+            custom: sign-and-publish
+            input-variables:
+              channel: $release_channel
+              commit: $BITBUCKET_COMMIT
+            artifacts:
+              upload:
+              - bundle
+              download:
+              - signatures
+        - step:
+            name: Record release
+            script:
+            - ./record-release.sh --channel "$release_channel" --signatures signatures/
+        sign-and-publish:
+        - step:
+            name: Sign
+            script:
+            - ./sign.sh dist/ --out signatures/
+            artifacts:
+              upload:
+              - name: signatures
+                paths:
+                - signatures/**
+            oidc: true
+        - step:
+            name: Publish
+            script:
+            - npm publish --tag "$channel"
+    
+    """
+  }
+  ["deployment_pipeline.yaml"] {
+    """
+    image: python:3.14
+    clone:
+      depth: 50
+    options:
+      max-time: 45
+    definitions:
+      caches:
+        pip-lockfile:
+          key:
+            files:
+            - requirements.lock
+          path: .venv
+    pipelines:
+      branches:
+        main:
+        - step:
+            name: Build
+            script:
+            - python -m venv .venv
+            - .venv/bin/pip install -r requirements.lock
+            - .venv/bin/python -m build
+            caches:
+            - pip-lockfile
+            artifacts:
+              upload:
+              - name: wheels
+                paths:
+                - dist/*.whl
+        - stage:
+            name: Deploy to staging
+            deployment: staging
+            steps:
+            - step:
+                name: Deploy
+                script:
+                - ./deploy.sh staging
+            - step:
+                name: Smoke test
+                script:
+                - ./smoke-test.sh https://staging.example.com
+                on-fail:
+                  strategy: retry
+                  maxRetryCount: 3
+        - stage:
+            name: Deploy to production
+            deployment: production
+            condition:
+              state: production_deploys_enabled == true
+            trigger: manual
+            steps:
+            - step:
+                name: Deploy
+                script:
+                - ./deploy.sh production
+                oidc: true
+            - step:
+                name: Smoke test
+                script:
+                - ./smoke-test.sh https://example.com
+        - final:
+            name: Report outcome
+            script:
+            - pipe: atlassian/slack-notify:2.3.1
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK
+                MESSAGE: Deploy of $BITBUCKET_COMMIT finished with code $BITBUCKET_EXIT_CODE
+    
+    """
+  }
+  ["monorepo_triggers.yaml"] {
+    """
+    pipelines:
+      custom:
+        build-api:
+        - step:
+            name: Build api
+            script:
+            - cd services/api
+            - go build ./...
+            - go test ./...
+            image: golang:1.26
+            caches:
+            - go
+        build-web:
+        - step:
+            name: Build web
+            script:
+            - cd services/web
+            - go build ./...
+            - go test ./...
+            image: golang:1.26
+            caches:
+            - go
+        build-worker:
+        - step:
+            name: Build worker
+            script:
+            - cd services/worker
+            - go build ./...
+            - go test ./...
+            image: golang:1.26
+            caches:
+            - go
+        build-all:
+        - parallel:
+            steps:
+            - step:
+                name: Build api
+                script:
+                - cd services/api
+                - go build ./...
+                - go test ./...
+                image: golang:1.26
+                caches:
+                - go
+            - step:
+                name: Build web
+                script:
+                - cd services/web
+                - go build ./...
+                - go test ./...
+                image: golang:1.26
+                caches:
+                - go
+            - step:
+                name: Build worker
+                script:
+                - cd services/worker
+                - go build ./...
+                - go test ./...
+                image: golang:1.26
+                caches:
+                - go
+            fail-fast: true
+    triggers:
+      repository-push:
+      - condition: BITBUCKET_BRANCH == "main" && changesetInclude("services/api/**")
+        pipelines:
+        - build-api
+      - condition: BITBUCKET_BRANCH == "main" && changesetInclude("services/web/**")
+        pipelines:
+        - build-web
+      - condition: BITBUCKET_BRANCH == "main" && changesetInclude("services/worker/**")
+        pipelines:
+        - build-worker
+      - condition: BITBUCKET_BRANCH == "main" && changesetInclude("Makefile", "go.work", ".bitbucket/**")
+        pipelines:
+        - build-all
+      pullrequest-push:
+      - condition: changesetExclude("docs/**", "*.md")
+        pipelines:
+        - build-all
+    
+    """
+  }
+  ["private_images_and_services.yaml"] {
+    """
+    image:
+      name: 0123456789012.dkr.ecr.us-west-2.amazonaws.com/build-base:2024.11
+      aws:
+        oidc-role: arn:aws:iam::0123456789012:role/bitbucket-pipelines
+    options:
+      size: 2x
+    definitions:
+      caches:
+        gradle-wrapper: ~/.gradle/wrapper
+        gradle-deps:
+          key:
+            files:
+            - gradle/verification-metadata.xml
+            - '**/*.gradle.kts'
+          path: ~/.gradle/caches
+      services:
+        postgres:
+          image: postgres:18
+          memory: 1024
+          variables:
+            POSTGRES_DB: test
+            POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+        docker:
+          image: docker:28-dind
+          memory: 3072
+          type: docker
+    pipelines:
+      default:
+      - step:
+          name: Test against Postgres
+          script:
+          - ./gradlew test
+          caches:
+          - gradle-wrapper
+          - gradle-deps
+          artifacts:
+            upload:
+            - name: junit
+              type: test-reports
+              paths:
+              - build/test-results/test/*.xml
+            - name: test logs
+              type: scoped
+              paths:
+              - build/reports/**
+              capture-on: failed
+          services:
+          - postgres
+      - step:
+          name: Build multi-arch image
+          script:
+          - docker buildx create --name multiarch --driver docker-container --use
+          - docker run --rm --privileged tonistiigi/binfmt --install all
+          - docker buildx build --platform linux/amd64,linux/arm64 -t app:$BITBUCKET_COMMIT .
+          services:
+          - docker
+          size: 4x
+          runtime:
+            cloud:
+              version: 3
+              arch: arm
+          oidc: true
+      - step:
+          name: Publish from a self-hosted runner
+          script:
+          - ./publish-internal.sh
+          clone:
+            depth: 1
+            skip-ssl-verify: true
+          runs-on:
+          - self.hosted
+          - linux
+    
+    """
+  }
+  ["reusable_steps.yaml"] {
+    """
+    image: node:24
+    pipelines:
+      default:
+      - step:
+          name: Build (development)
+          script:
+          - npm ci
+          - npm run build -- --mode=development
+          caches:
+          - node
+          artifacts:
+          - dist/**
+      - parallel:
+          steps:
+          - step:
+              name: Test 1/3
+              script:
+              - npm ci
+              - npm test -- --shard=1/3
+              caches:
+              - node
+          - step:
+              name: Test 2/3
+              script:
+              - npm ci
+              - npm test -- --shard=2/3
+              caches:
+              - node
+          - step:
+              name: Test 3/3
+              script:
+              - npm ci
+              - npm test -- --shard=3/3
+              caches:
+              - node
+      branches:
+        main:
+        - step:
+            name: Build (production)
+            script:
+            - npm ci
+            - npm run build -- --mode=production
+            caches:
+            - node
+            artifacts:
+            - dist/**
+            max-time: 30
+            size: 2x
+        - step:
+            name: Test 1/1
+            script:
+            - npm ci
+            - npm test -- --shard=1/1
+            caches:
+            - node
+    
+    """
+  }
+  ["shared_pipelines.yaml"] {
+    """
+    export: true
+    definitions:
+      pipelines:
+        lint:
+        - step:
+            name: Lint
+            script:
+            - golangci-lint run ./...
+            image: golangci/golangci-lint:latest
+      imports:
+        local-shared: .bitbucket/shared-pipelines.yml
+        platform: platform-pipelines:v2.4.0
+        platform-deploy: platform-pipelines:v2.4.0:.bitbucket/deploy.yml
+    pipelines:
+      default:
+      - step:
+          name: Test
+          script:
+          - go test ./...
+          image: golang:1.26
+      branches:
+        main:
+          import: standard-release@platform
+      custom:
+        deploy:
+          import: deploy@platform-deploy
+    
+    """
+  }
+}
