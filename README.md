@@ -156,13 +156,17 @@ Two things to know when reusing steps this way:
 
 ## Development
 
-Tasks are defined in [`mise.toml`](mise.toml):
+`mise.toml` declares the toolchain — pkl and java — so `mise install` is the only setup step. It
+also defines every task:
 
 ```console
-mise run test          # snapshot-test every example
-mise run test:record   # re-record after an intended schema change
-mise run package       # build the publishable package into .out/
-mise run pkl:gen       # regenerate .github/workflows/ from .github/pkl/
+mise run test              # snapshot tests plus the version-consistency checks
+mise run test:record       # re-record the snapshots after an intended schema change
+mise run pkl:gen           # regenerate .github/workflows/ from .github/pkl/
+mise run doc               # generate API docs into .out/doc/
+mise run package           # build the release artifacts into .out/
+mise run package:verify    # as above, but ignore whether this version was published
+mise run version:set 1.2.3 # bump the package version everywhere
 ```
 
 This repo's own GitHub Actions workflows are written in Pkl under
@@ -238,11 +242,14 @@ from it, is: [`doc-package-info.pkl`](doc-package-info.pkl) imports it, so its `
 
 Prose cannot be computed, so the install snippets in this README and the usage example in
 `Config.pkl` are instead *checked*: [`tests/Version.pkl`](tests/Version.pkl) asserts that every
-`com.atlassian.bitbucket.pipelines@<version>` reference equals `package.version`, and that the
-`pkl-tools` jar URL matches the pkl version CI installs. A stale reference fails the build rather
-than pointing users at a package that was never published.
+`com.atlassian.bitbucket.pipelines@<version>` reference equals `package.version`. A stale reference
+fails the build rather than pointing users at a package that was never published.
 
 `mise run version:set <version>` rewrites all of them together.
+
+The pkl version needs neither derivation nor a check: it is declared once, as a tool in
+`mise.toml`, and the `doc` task pins the `pkl-tools` jar to whatever `pkl --version` reports at run
+time — so there is no second copy to keep aligned.
 
 The [Release workflow](.github/pkl/release.pkl) packages the module, verifies the tag matches
 `package.version`, and publishes the artifacts to a GitHub release.
