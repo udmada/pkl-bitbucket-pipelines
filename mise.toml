@@ -25,7 +25,8 @@ run = "pkl test --overwrite tests/Config.pkl"
 [tasks."version:set"]
 description = "Set the package version everywhere (usage: mise run version:set 1.2.3)"
 run = '''
-set -euo pipefail
+# `set -eu` only: pipefail is not POSIX, and mise runs tasks with sh (dash on Ubuntu runners).
+set -eu
 
 package="com.atlassian.bitbucket.pipelines"
 new="{{arg(name="version")}}"
@@ -80,8 +81,15 @@ run = "pkl project package --skip-publish-check"
 [tasks.doc]
 description = "Generate API documentation into .out/doc/"
 run = '''
-set -euo pipefail
+# `set -eu` only: mise runs tasks with sh, which is dash on Ubuntu runners, and pipefail is not
+# POSIX. The pipeline below is guarded explicitly instead, since without pipefail a failing `pkl`
+# would still leave awk succeeding with empty output.
+set -eu
 version="$(pkl --version | awk '{print $2}')"
+if [ -z "$version" ]; then
+  echo "error: could not determine the pkl version from 'pkl --version'" >&2
+  exit 1
+fi
 jar="${TMPDIR:-/tmp}/pkl-tools-$version.jar"
 [ -f "$jar" ] || curl -sSLf -o "$jar" \
   "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/$version/pkl-tools-$version.jar"
