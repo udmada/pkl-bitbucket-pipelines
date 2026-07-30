@@ -106,7 +106,8 @@ Note that `default` and `import` are Pkl keywords, so they need backticks: `` `d
 
 Every property carries the documentation from the Atlassian reference, so editors with
 [Pkl language support](https://pkl-lang.org/main/current/tools.html) show allowed values,
-defaults, and plan restrictions inline.
+defaults, and plan restrictions inline. The same doc comments are published as browsable API
+documentation at **[udmada.github.io/pkl-bitbucket-pipelines](https://udmada.github.io/pkl-bitbucket-pipelines/)**.
 
 ### YAML anchors are deliberately omitted
 
@@ -169,6 +170,22 @@ This repo's own GitHub Actions workflows are written in Pkl under
 `.github/workflows/`. Actions are pinned to git SHAs recorded in
 `.github/workflows/__lockfile__.yml`, which dependabot keeps current. Edit the Pkl, never the
 generated YAML — CI fails if the two disagree.
+
+### API documentation
+
+The [Docs workflow](.github/pkl/docs.pkl) publishes pkldoc output to GitHub Pages on every push to
+`master`. Note that pkldoc is **not** part of the native `pkl` CLI, which has no `doc` subcommand —
+it lives in the JVM `pkl-tools` jar, so the workflow fetches that from Maven Central pinned to the
+same version the rest of CI uses. To generate the docs locally:
+
+```console
+curl -sSLf -o /tmp/pkl-tools.jar \
+  https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/0.32.1/pkl-tools-0.32.1.jar
+java -cp /tmp/pkl-tools.jar org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+```
+
+`doc-package-info.pkl` must be passed alongside the modules — pkldoc refuses to run without it,
+and it supplies the package name, version, and import URI the pages are built around.
 
 ## Releasing
 
