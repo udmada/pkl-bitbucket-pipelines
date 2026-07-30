@@ -1,0 +1,33 @@
+# Generated from Workflow.pkl. DO NOT EDIT.
+name: Docs
+'on':
+  push:
+    branches:
+    - master
+  workflow_dispatch: {}
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with: {}
+    - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+      with:
+        java-version: '25'
+        distribution: temurin
+    - name: Generate pkldoc
+      run: |-
+        curl -sSLf -o /tmp/pkl-tools.jar \
+          "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/0.32.1/pkl-tools-0.32.1.jar"
+        java -cp /tmp/pkl-tools.jar org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+    - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+      with:
+        path: .out/doc
+  deploy:
+    needs: generate
+    permissions:
+      id-token: write
+      pages: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

@@ -7,6 +7,7 @@ amends "@pkl.github.dependabotManagedActions/DependabotManagedActions.pkl"
 workflows {
   ["workflows/ci.yml"] = import("ci.pkl")
   ["workflows/release.yml"] = import("release.pkl")
+  ["workflows/docs.yml"] = import("docs.pkl")
 }
 
 // Dependabot has no ecosystem for Pkl packages, so the only updater here is the `github-actions`
