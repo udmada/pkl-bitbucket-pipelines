@@ -1,19 +1,24 @@
 /// Write Bitbucket Pipelines configuration with Pkl.
 ///
-/// Consumed by `pkl doc` to title and link the generated documentation.
+/// Consumed by pkldoc to title and link the generated documentation.
+///
+/// Everything here is derived from `PklProject`, which is the single source of truth for the
+/// package name and version — there is nothing to keep in sync by hand. Because of that import,
+/// this module is excluded from the published package, where `PklProject` is not present.
 amends "pkl:DocPackageInfo"
 
-name = "com.atlassian.bitbucket.pipelines"
+import "PklProject" as project
 
-version = "1.0.0"
+local pkg = project.package
 
-importUri =
-  "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/\(name)@\(version)/"
+name = pkg.name
 
-sourceCode = "https://github.com/udmada/pkl-bitbucket-pipelines"
+version = pkg.version
 
-issueTracker = "https://github.com/udmada/pkl-bitbucket-pipelines/issues"
+importUri = "\(pkg.baseUri)@\(pkg.version)/"
 
-authors {
-  "udmada <git@adamdu.nz>"
-}
+sourceCode = pkg.website
+
+issueTracker = pkg.issueTracker
+
+authors = pkg.authors
