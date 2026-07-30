@@ -1,21 +1,90 @@
+# The single source of truth for the toolchain; `jdx/mise-action` installs these in CI, so the
+# workflows need no setup-pkl or setup-java step. Pinned rather than "latest" so builds are
+# reproducible. java is here only because pkldoc is a JVM tool — see the `doc` task.
 [tools]
-pkl = "latest"
+java = "temurin-25"
+pkl = "0.32.1"
 
 [tasks."pkl:gen"]
 description = "Generate GitHub Actions YAML from pkl sources"
 run = "pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl"
 
 [tasks.test]
-description = "Run the schema snapshot tests"
-run = "pkl test tests/Config.pkl"
+description = "Run the snapshot and version-consistency tests"
+run = "pkl test tests/*.pkl"
 
 [tasks."test:record"]
 description = "Re-record the snapshot tests after an intended schema change"
 run = "pkl test --overwrite tests/Config.pkl"
 
+# Rewrites PklProject (the source of truth for package.version) plus the version strings in
+# README.md and Config.pkl. doc-package-info.pkl is not touched because it derives its version from
+# PklProject. tests/Version.pkl verifies the result, so run `mise run test` afterwards.
+#
+# perl rather than `sed -i`: BSD and GNU sed disagree on the -i argument, and this runs on both.
+[tasks."version:set"]
+description = "Set the package version everywhere (usage: mise run version:set 1.2.3)"
+run = '''
+set -euo pipefail
+
+package="com.atlassian.bitbucket.pipelines"
+new="{{arg(name="version")}}"
+
+if ! printf '%s' "$new" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+  echo "error: '$new' is not a semver version" >&2
+  exit 1
+fi
+
+old="$(perl -ne 'print $1 and last if /^\s*version = "(.+)"$/' PklProject)"
+if [ -z "$old" ]; then
+  echo "error: could not read package.version from PklProject" >&2
+  exit 1
+fi
+if [ "$old" = "$new" ]; then
+  echo "already at $new; nothing to do"
+  exit 0
+fi
+
+# Values reach perl through the environment, never by splicing them into the program text: an
+# interpolated "@1.2.3" in a replacement would be read as an array variable and silently vanish.
+OLD="$old" NEW="$new" perl -i -pe \
+  's/^(\s*version = )"\Q$ENV{OLD}\E"$/$1 . chr(34) . $ENV{NEW} . chr(34)/e' PklProject
+
+PKG="$package" OLD="$old" NEW="$new" perl -i -pe \
+  'BEGIN { $from = quotemeta("$ENV{PKG}\@$ENV{OLD}"); $to = "$ENV{PKG}\@$ENV{NEW}" } s/$from/$to/g' \
+  README.md Config.pkl
+
+echo "$old -> $new"
+grep -n 'version = ' PklProject | sed 's/^/  /'
+grep -rn "$package@$new" README.md Config.pkl | sed 's/^/  /' || true
+echo
+echo "Now run: mise run test"
+'''
+
 [tasks.package]
-description = "Build the publishable package into .out/"
+description = "Build the publishable package into .out/, refusing to differ from a published version"
 run = "pkl project package"
 
-# Note: there is no `doc` task. The native `pkl` CLI has no `doc` subcommand — pkldoc ships only
-# with the JVM distribution. `doc-package-info.pkl` is kept for whoever generates docs with it.
+# CI builds the package on every push purely to check it still builds. Once a version is published,
+# the strict check fails for any content change until the version is bumped — correct for releasing,
+# but it would block every master push, so the check is skipped here.
+[tasks."package:verify"]
+description = "Check the package builds, ignoring whether this version was already published"
+run = "pkl project package --skip-publish-check"
+
+# pkldoc is not part of the native pkl CLI, which has no `doc` subcommand. It lives in the JVM
+# `pkl-tools` jar, which mise cannot install as a tool, so it is fetched here — pinned to whichever
+# pkl mise installed, so the two can never disagree and no version is written down twice.
+#
+# doc-package-info.pkl must be passed alongside the modules; pkldoc refuses to run without it.
+[tasks.doc]
+description = "Generate API documentation into .out/doc/"
+run = '''
+set -euo pipefail
+version="$(pkl --version | awk '{print $2}')"
+jar="${TMPDIR:-/tmp}/pkl-tools-$version.jar"
+[ -f "$jar" ] || curl -sSLf -o "$jar" \
+  "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/$version/pkl-tools-$version.jar"
+java -cp "$jar" org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+echo "open .out/doc/index.html"
+'''
