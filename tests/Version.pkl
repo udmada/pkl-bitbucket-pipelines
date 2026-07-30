@@ -1,0 +1,50 @@
+/// Guards against version strings drifting apart.
+///
+/// `PklProject` is the single source of truth for the package version. Prose cannot be computed from
+/// it, so instead every version the README and `Config.pkl` mention is checked against it here — a
+/// stale `@1.0.0` in an install snippet fails the build rather than sending users to a package that
+/// was never published.
+///
+/// The pkl toolchain version needs no check: it is declared once in `mise.toml`, and the `doc` task
+/// derives the pkldoc jar from whatever `pkl --version` reports.
+///
+/// Run `mise run version:set <version>` to bump everything at once.
+module com.atlassian.bitbucket.pipelines.tests.Version
+
+amends "pkl:test"
+
+import "../PklProject" as project
+
+/// The version every `<package-name>@<version>` reference must use.
+local packageVersion = project.package.version
+
+/// Every `com.atlassian.bitbucket.pipelines@<semver>` mentioned in [source], deduplicated.
+local function packageRefsIn(source: String): List<String> =
+  Regex(#"\Qcom.atlassian.bitbucket.pipelines\E@(\d+\.\d+\.\d+)"#)
+    .findMatchesIn(source)
+    .map((it) -> it.groups[1].value)
+    .distinct
+
+local readme = read("../README.md").text
+
+local schema = read("../Config.pkl").text
+
+facts {
+  ["README pins only the current package version"] {
+    packageRefsIn(readme).every((it) -> it == packageVersion)
+  }
+
+  ["README actually pins the package version somewhere"] {
+    // Guards the check above, which a README mentioning no version at all would pass vacuously.
+    !packageRefsIn(readme).isEmpty
+  }
+
+  ["Config.pkl's usage example pins the current package version"] {
+    packageRefsIn(schema).every((it) -> it == packageVersion)
+  }
+
+
+  ["doc-package-info derives its version from PklProject"] {
+    import("../doc-package-info.pkl").version == packageVersion
+  }
+}
