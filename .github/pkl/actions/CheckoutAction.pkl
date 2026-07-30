@@ -1,0 +1,76 @@
+// Converted from https://github.com/actions/checkout/blob/v7/action.yml
+//
+// `@com.github.actions/catalog.pkl` only carries up to `actions/checkout@v6`, so v7 is declared
+// here until the catalog catches up.
+module actions.checkout.v7.CheckoutAction
+
+extends "@com.github.actions/AbstractTypedStep.pkl"
+
+fixed action: "actions/checkout"
+
+fixed version: "v7"
+
+with: With
+
+class With {
+  /// Repository name with owner, such as `actions/checkout`. Defaults to the current repository.
+  repository: String?
+
+  /// The branch, tag, or SHA to check out. Defaults to the ref that triggered the workflow.
+  ref: String?
+
+  /// Personal access token used to fetch the repository.
+  token: String?
+
+  /// SSH key used to fetch the repository, as an alternative to [token].
+  `ssh-key`: String?
+
+  /// Known hosts appended to the generated `known_hosts` file.
+  `ssh-known-hosts`: String?
+
+  /// Whether to perform strict host key checking.
+  `ssh-strict`: Boolean?
+
+  /// Whether to configure the token or SSH key in the local git config.
+  ///
+  /// Set `false` when a later step must not be able to use the credentials.
+  `persist-credentials`: Boolean?
+
+  /// Relative path under `$GITHUB_WORKSPACE` to check out into.
+  path: String?
+
+  /// Whether to run `git clean -ffdx && git reset --hard HEAD` before fetching.
+  clean: Boolean?
+
+  /// Partial-clone filter, such as `blob:none`.
+  filter: String?
+
+  /// Patterns to sparsely check out, one per line.
+  `sparse-checkout`: String?
+
+  /// Whether sparse checkout uses cone mode.
+  `sparse-checkout-cone-mode`: Boolean?
+
+  /// Number of commits to fetch. `0` fetches all history and tags.
+  ///
+  /// Tools that read history — `git describe`, release-note generators — need `0`.
+  `fetch-depth`: Int?
+
+  /// Whether to fetch tags even when [`fetch-depth`] is not `0`.
+  `fetch-tags`: Boolean?
+
+  /// Whether to print fetch progress.
+  `show-progress`: Boolean?
+
+  /// Whether to download Git LFS files.
+  lfs: Boolean?
+
+  /// Whether to check out submodules: `true`, `false`, or `"recursive"`.
+  submodules: (Boolean | "recursive")?
+
+  /// Whether to add the repository path to `safe.directory` in the global git config.
+  `set-safe-directory`: Boolean?
+
+  /// Base URL to clone from, for GitHub Enterprise Server.
+  `github-server-url`: String?
+}
