@@ -1,0 +1,14 @@
+// Invalid: the first step of a pipeline cannot be manual.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./deploy.sh" }
+      trigger = "manual"
+    }
+    new Step {
+      script { "./verify.sh" }
+    }
+  }
+}

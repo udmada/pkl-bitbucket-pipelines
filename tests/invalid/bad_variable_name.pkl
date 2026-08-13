@@ -1,0 +1,17 @@
+// Invalid: a variable name cannot start with a digit.
+amends "../../Config.pkl"
+
+pipelines {
+  custom {
+    ["release"] {
+      new Variables {
+        variables {
+          new { name = "1CHANNEL" }
+        }
+      }
+      new Step {
+        script { "./build.sh" }
+      }
+    }
+  }
+}

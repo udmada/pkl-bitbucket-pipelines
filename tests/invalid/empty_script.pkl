@@ -1,0 +1,10 @@
+// Invalid: a step must have at least one script command.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      name = "Does nothing"
+    }
+  }
+}

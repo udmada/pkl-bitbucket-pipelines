@@ -1,0 +1,14 @@
+// Invalid: `maxRetryCount` is only meaningful when the strategy is `retry`.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+      `on-fail` {
+        strategy = "ignore"
+        maxRetryCount = 3
+      }
+    }
+  }
+}

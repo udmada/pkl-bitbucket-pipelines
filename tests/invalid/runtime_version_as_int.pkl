@@ -1,0 +1,15 @@
+// Invalid: the runtime version is the string "2" or "3", matching the documented YAML form.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+      runtime {
+        cloud {
+          version = 3
+        }
+      }
+    }
+  }
+}

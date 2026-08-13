@@ -1,0 +1,17 @@
+// Invalid: custom pipeline variables must be declared as the first element.
+amends "../../Config.pkl"
+
+pipelines {
+  custom {
+    ["release"] {
+      new Step {
+        script { "./build.sh" }
+      }
+      new Variables {
+        variables {
+          new { name = "channel" }
+        }
+      }
+    }
+  }
+}

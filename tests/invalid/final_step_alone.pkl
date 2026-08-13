@@ -1,0 +1,10 @@
+// Invalid: at least one non-final step must precede a final step.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new FinalStep {
+      script { "./cleanup.sh" }
+    }
+  }
+}

@@ -10,8 +10,28 @@ description = "Generate GitHub Actions YAML from pkl sources"
 run = "pkl eval -m .github/ --project-dir .github/pkl .github/pkl/index.pkl"
 
 [tasks.test]
-description = "Run the snapshot and version-consistency tests"
-run = "pkl test tests/*.pkl"
+description = "Run the snapshot, version-consistency, and invalid-config tests"
+run = ["pkl test tests/*.pkl", "mise run test:invalid"]
+
+# Pkl has no way to catch an error inside a test module, so configurations that are supposed to
+# fail evaluation are checked from the shell instead: each file under tests/invalid/ must make
+# `pkl eval` exit non-zero. This is what guards the schema's constraints against being
+# accidentally loosened.
+[tasks."test:invalid"]
+description = "Check that every configuration under tests/invalid/ fails to evaluate"
+run = '''
+set -eu
+status=0
+for f in tests/invalid/*.pkl; do
+  if pkl eval "$f" >/dev/null 2>&1; then
+    echo "FAIL: $f evaluated cleanly but must be rejected" >&2
+    status=1
+  else
+    echo "ok: $f rejected"
+  fi
+done
+exit $status
+'''
 
 [tasks."test:record"]
 description = "Re-record the snapshot tests after an intended schema change"

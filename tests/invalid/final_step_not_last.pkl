@@ -1,0 +1,16 @@
+// Invalid: a final step must be the last element of its pipeline.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+    }
+    new FinalStep {
+      script { "./cleanup.sh" }
+    }
+    new Step {
+      script { "./deploy.sh" }
+    }
+  }
+}

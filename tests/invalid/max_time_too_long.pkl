@@ -1,0 +1,11 @@
+// Invalid: `max-time` exceeds the 720-minute ceiling.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+      `max-time` = 800
+    }
+  }
+}

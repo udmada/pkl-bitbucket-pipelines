@@ -44,4 +44,6 @@ package {
   }
 }
 
-tests = import*("tests/**.pkl").keys.toListing()
+// Only the top level: tests/invalid/ holds configurations that must *fail* evaluation, which the
+// `test:invalid` mise task checks from the shell — they are not pkl:test modules.
+tests = import*("tests/*.pkl").keys.toListing()
