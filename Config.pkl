@@ -122,7 +122,40 @@ class PipelineDefinitions {
 
 /// A single pipeline: either a sequence of elements to run, or an import of a pipeline shared
 /// from elsewhere.
-typealias Pipeline = *Listing<PipelineElement> | PipelineImport
+///
+/// The sequence form enforces the ordering rules Bitbucket applies on push: a [FinalStep] must
+/// come last and follow at least one ordinary step, a [Variables] element may only come first,
+/// and the first step or stage of a pipeline cannot be `manual`.
+typealias Pipeline = *Listing<PipelineElement>(
+    finalStepComesLast(toList()),
+    variablesComeFirst(toList()),
+    firstElementIsNotManual(toList())
+  ) | PipelineImport
+
+/// Whether any [FinalStep] in [elements] is the last element, preceded by at least one ordinary
+/// step.
+const local function finalStepComesLast(elements: List<PipelineElement>): Boolean =
+  let (finalCount = elements.count((it) -> it is FinalStep))
+    finalCount == 0
+    ||
+    (finalCount == 1
+      && elements.last is FinalStep
+      && elements.any((it) -> it is (Step|ChildPipelineStep|Parallel|ParallelSteps|Stage)))
+
+/// Whether every [Variables] element in [elements] comes first, where custom pipeline variables
+/// must be declared.
+const local function variablesComeFirst(elements: List<PipelineElement>): Boolean =
+  elements.drop(1).every((it) -> !(it is Variables))
+
+/// Whether the first step or stage in [elements] starts automatically.
+///
+/// [Variables] elements are skipped: in a custom pipeline they precede the first step.
+const local function firstElementIsNotManual(elements: List<PipelineElement>): Boolean =
+  let (first = elements.filter((it) -> !(it is Variables)).firstOrNull)
+    if (first is Step) first.trigger != "manual"
+    else if (first is ChildPipelineStep) first.trigger != "manual"
+    else if (first is Stage) first.trigger != "manual"
+    else true
 
 /// Runs a pipeline definition shared from another file or repository in place of a local one.
 ///
@@ -965,7 +998,7 @@ class CloudRuntime {
   /// the Pipelines Docker cache is ignored, so use Buildx caching instead.
   ///
   /// See [Enable and use Runtime v3](https://support.atlassian.com/bitbucket-cloud/docs/enable-and-use-runtime-v3/).
-  version: (Int(isBetween(2, 3)) | "2" | "3")?
+  version: ("2" | "3")?
 
   /// Whether to route the step's ingress and egress traffic through Atlassian IP ranges rather
   /// than the default AWS ranges.

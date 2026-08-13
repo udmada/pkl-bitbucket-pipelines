@@ -292,7 +292,7 @@ examples {
           size: 4x
           runtime:
             cloud:
-              version: 3
+              version: '3'
               arch: arm
           oidc: true
       - step:

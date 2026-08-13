@@ -87,7 +87,7 @@ pipelines {
       // CLI, so the image above must ship one.
       runtime {
         cloud {
-          version = 3
+          version = "3"
           arch = "arm"
         }
       }
