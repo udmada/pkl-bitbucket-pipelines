@@ -8,7 +8,7 @@
 /// `pkl eval -f yaml MyPipeline.pkl`:
 ///
 /// ```
-/// amends "package://pkg.pkl-lang.org/…/com.atlassian.bitbucket.pipelines@1.1.0#/Config.pkl"
+/// amends "package://pkg.pkl-lang.org/…/com.atlassian.bitbucket.pipelines@1.1.1#/Config.pkl"
 ///
 /// pipelines {
 ///   `default` {

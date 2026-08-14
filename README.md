@@ -23,7 +23,7 @@ package in pkl-pantry and StefMa's [`pkl-gha`](https://github.com/StefMa/pkl-gha
 The simplest form. Point `amends` at the package and write your pipeline:
 
 ```pkl
-amends "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.0#/Config.pkl"
+amends "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.1#/Config.pkl"
 
 image = "node:24"
 
@@ -53,7 +53,7 @@ amends "pkl:Project"
 
 dependencies {
   ["com.atlassian.bitbucket.pipelines"] {
-    uri = "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.0"
+    uri = "package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.1"
   }
 }
 ```
@@ -204,13 +204,13 @@ Publishing is driven entirely by the tag name, because that is what makes a pack
 `pkg.pkl-lang.org` is a redirector: it rewrites
 
 ```
-package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.0
+package://pkg.pkl-lang.org/github.com/udmada/pkl-bitbucket-pipelines/com.atlassian.bitbucket.pipelines@1.1.1
 ```
 
 to
 
 ```
-https://github.com/udmada/pkl-bitbucket-pipelines/releases/download/com.atlassian.bitbucket.pipelines@1.1.0/com.atlassian.bitbucket.pipelines@1.1.0
+https://github.com/udmada/pkl-bitbucket-pipelines/releases/download/com.atlassian.bitbucket.pipelines@1.1.1/com.atlassian.bitbucket.pipelines@1.1.1
 ```
 
 which must be the package metadata file, sitting alongside the `.zip` it names. So a release has

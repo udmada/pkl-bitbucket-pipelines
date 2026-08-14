@@ -4,7 +4,7 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.1] - 2026-08-14
 
 ### Changed
 
@@ -45,6 +45,6 @@ All notable changes to this package are documented here. The format follows
   Bitbucket's limits enforced as type constraints.
 - Seven examples covering the schema surface, each rendered and snapshot-tested.
 
-[Unreleased]: https://github.com/udmada/pkl-bitbucket-pipelines/compare/com.atlassian.bitbucket.pipelines@1.1.0...HEAD
+[1.1.1]: https://github.com/udmada/pkl-bitbucket-pipelines/compare/com.atlassian.bitbucket.pipelines@1.1.0...com.atlassian.bitbucket.pipelines@1.1.1
 [1.1.0]: https://github.com/udmada/pkl-bitbucket-pipelines/compare/com.atlassian.bitbucket.pipelines@1.0.0...com.atlassian.bitbucket.pipelines@1.1.0
 [1.0.0]: https://github.com/udmada/pkl-bitbucket-pipelines/releases/tag/com.atlassian.bitbucket.pipelines@1.0.0
