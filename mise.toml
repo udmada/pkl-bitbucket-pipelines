@@ -93,6 +93,40 @@ run = "pkl project package"
 description = "Check the package builds, ignoring whether this version was already published"
 run = "pkl project package --skip-publish-check"
 
+# Pkl has no registry query: the CLI only fetches exact versions, so discovering what is current
+# means looking at the source. pkg.pkl-lang.org is a redirector onto GitHub releases tagged
+# `<package>@<version>`, which makes `git ls-remote --tags` the registry query — no token, no API
+# rate limits. Report-only and always exits 0: a pin may be held back deliberately.
+#
+# To bump: edit the version in .github/pkl/PklProject, then
+# `pkl project resolve .github/pkl` and `mise run pkl:gen`.
+[tasks."deps:outdated"]
+description = "Report workflow-generator dependencies that are behind their upstream release"
+run = '''
+set -eu
+grep -o 'package://pkg\.pkl-lang\.org/[^"]*@[0-9][^"]*' .github/pkl/PklProject \
+| while IFS= read -r uri; do
+  path="${uri#package://pkg.pkl-lang.org/}"
+  ref="${path##*/}"
+  name="${ref%@*}"
+  pinned="${ref#*@}"
+  case "$path" in
+    pkl-pantry/*) repo="apple/pkl-pantry" ;;
+    github.com/*) repo="$(printf '%s' "${path#github.com/}" | cut -d/ -f1-2)" ;;
+    *) echo "skip: $uri (not a GitHub-backed package)"; continue ;;
+  esac
+  latest="$(git ls-remote --tags "https://github.com/$repo" "$name@*" \
+    | sed 's|.*refs/tags/||' | grep -v '\^{}$' | sed "s|^$name@||" | sort -V | tail -1)"
+  if [ -z "$latest" ]; then
+    echo "?? $name: no release tags found in $repo" >&2
+  elif [ "$latest" = "$pinned" ]; then
+    echo "ok $name@$pinned"
+  else
+    echo "-> $name@$pinned is behind: $latest available"
+  fi
+done
+'''
+
 # pkldoc is not part of the native pkl CLI, which has no `doc` subcommand. It lives in the JVM
 # `pkl-tools` jar, which mise cannot install as a tool, so it is fetched here — pinned to whichever
 # pkl mise installed, so the two can never disagree and no version is written down twice.
