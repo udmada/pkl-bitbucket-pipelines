@@ -42,9 +42,4 @@ facts {
   ["Config.pkl's usage example pins the current package version"] {
     packageRefsIn(schema).every((it) -> it == packageVersion)
   }
-
-
-  ["doc-package-info derives its version from PklProject"] {
-    import("../doc-package-info.pkl").version == packageVersion
-  }
 }

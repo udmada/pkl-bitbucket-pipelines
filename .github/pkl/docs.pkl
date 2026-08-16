@@ -18,6 +18,13 @@ on {
   push {
     branches { "master" }
   }
+  // A push that releases (commit and tag pushed together) races the Release workflow: the new
+  // tag is visible before its package assets exist, so the push-triggered run skips it. This
+  // trigger regenerates once the Release workflow finishes, picking the new version up.
+  workflow_run {
+    workflows { "Release" }
+    types { "completed" }
+  }
   workflow_dispatch {}
 }
 

@@ -131,13 +131,17 @@ done
 # `pkl-tools` jar, which mise cannot install as a tool, so it is fetched here — pinned to whichever
 # pkl mise installed, so the two can never disagree and no version is written down twice.
 #
-# doc-package-info.pkl must be passed alongside the modules; pkldoc refuses to run without it.
+# The site documents published releases only: each release tag becomes a package URI, which pkldoc
+# accepts as an input, so every version lands under one package identity with a complete
+# "All versions" list. The working tree is deliberately not an input — pkldoc documents raw
+# modules under a bare package name (DocPackageInfo.name cannot contain `/`), which would split
+# the site into two packages, each listing only its own versions.
 [tasks.doc]
-description = "Generate API documentation into .out/doc/"
+description = "Generate API documentation for every published release into .out/doc/"
 run = '''
 # `set -eu` only: mise runs tasks with sh, which is dash on Ubuntu runners, and pipefail is not
-# POSIX. The pipeline below is guarded explicitly instead, since without pipefail a failing `pkl`
-# would still leave awk succeeding with empty output.
+# POSIX. The pipelines below are guarded explicitly instead, since without pipefail a failing
+# command would still leave the tail of the pipe succeeding with empty output.
 set -eu
 version="$(pkl --version | awk '{print $2}')"
 if [ -z "$version" ]; then
@@ -147,6 +151,35 @@ fi
 jar="${TMPDIR:-/tmp}/pkl-tools-$version.jar"
 [ -f "$jar" ] || curl -sSLf -o "$jar" \
   "https://repo1.maven.org/maven2/org/pkl-lang/pkl-tools/$version/pkl-tools-$version.jar"
-java -cp "$jar" org.pkl.doc.Main doc-package-info.pkl Config.pkl -o .out/doc
+
+base="$(pkl eval PklProject -x package.baseUri)"
+package="${base##*/}"
+repository="$(pkl eval PklProject -x package.website)"
+
+# `git ls-remote` rather than local tags because CI checks out with fetch-depth 1, fetching none.
+versions="$(git ls-remote --tags origin "$package@*" \
+  | sed 's|.*refs/tags/||' | grep -v '\^{}$' | sed "s|^$package@||")"
+if [ -z "$versions" ]; then
+  echo "error: found no $package@* release tags to document" >&2
+  exit 1
+fi
+
+# A tag exists the moment it is pushed, but its package is only resolvable once the Release
+# workflow has uploaded the assets. Skip versions whose metadata file is not there yet rather
+# than fail — the Docs run triggered by the Release workflow's completion picks them up.
+set --
+for v in $versions; do
+  if curl -sfIL -o /dev/null "$repository/releases/download/$package@$v/$package@$v"; then
+    set -- "$@" "$base@$v"
+  else
+    echo "skipping $package@$v: release assets not published yet" >&2
+  fi
+done
+if [ "$#" -eq 0 ]; then
+  echo "error: no published versions to document" >&2
+  exit 1
+fi
+
+java -cp "$jar" org.pkl.doc.Main "$@" -o .out/doc
 echo "open .out/doc/index.html"
 '''

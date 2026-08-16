@@ -5,6 +5,11 @@ name: Docs
     branches:
     - master
   workflow_dispatch: {}
+  workflow_run:
+    types:
+    - completed
+    workflows:
+    - Release
 jobs:
   generate:
     runs-on: ubuntu-latest

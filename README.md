@@ -178,7 +178,7 @@ generated YAML — CI fails if the two disagree.
 ### API documentation
 
 The [Docs workflow](.github/pkl/docs.pkl) publishes pkldoc output to GitHub Pages on every push to
-`master`, by running the same task you can run locally:
+`master` and after every release, by running the same task you can run locally:
 
 ```console
 mise run doc
@@ -190,8 +190,11 @@ itself, pinned to whatever `pkl --version` reports, so the documentation generat
 version can never disagree and no version is written down twice. `java` comes from `mise.toml`
 alongside `pkl`, which is why the workflows need no `setup-java` step.
 
-`doc-package-info.pkl` must be passed alongside the modules — pkldoc refuses to run without it, and
-it supplies the package name, version, and import URI the pages are built around.
+The site documents the *published releases*, not the working tree: the task lists the
+`<name>@<version>` release tags and passes each package URI to pkldoc, so every released version
+appears in one "All versions" list. Documenting the local modules instead would split the site in
+two — pkldoc files raw modules under a bare package name, and published packages under their full
+URI, each with only its own versions.
 
 Pages must be enabled once, under **Settings → Pages → Build and deployment**, with **Source** set
 to **GitHub Actions**. That source deploys the artifact the workflow uploads, so there is no branch
@@ -236,9 +239,7 @@ To cut a release:
 
 ### Keeping versions aligned
 
-`PklProject` is the single source of truth for the package version. Everything that can be derived
-from it, is: [`doc-package-info.pkl`](doc-package-info.pkl) imports it, so its `version` and
-`importUri` are computed rather than copied.
+`PklProject` is the single source of truth for the package version.
 
 Prose cannot be computed, so the install snippets in this README and the usage example in
 `Config.pkl` are instead *checked*: [`tests/Version.pkl`](tests/Version.pkl) asserts that every

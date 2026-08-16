@@ -39,8 +39,6 @@ package {
     "assets/**"
     "examples/**"
     "tests/**"
-    // Imports this PklProject, which is not shipped in the package.
-    "doc-package-info.pkl"
   }
 }
 
