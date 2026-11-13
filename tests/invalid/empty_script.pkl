@@ -1,4 +1,5 @@
 // Invalid: a step must have at least one script command.
+// expect: `!isEmpty`
 amends "../../Config.pkl"
 
 pipelines {

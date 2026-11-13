@@ -1,0 +1,15 @@
+// Invalid: a runtime must configure `cloud` or `self-hosted`.
+// expect: `this != null || cloud != null`
+amends "../../Config.pkl"
+
+options {
+  runtime {}
+}
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+// Invalid: a step can use at most five services.
+// expect: `length <= 5`
+amends "../../Config.pkl"
+
+definitions {
+  services {
+    for (service in List("a", "b", "c", "d", "e", "f")) {
+      [service] { image = "redis:8" }
+    }
+  }
+}
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./test.sh" }
+      services { "a"; "b"; "c"; "d"; "e"; "f" }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 // Invalid: a final step must be the last element of its pipeline.
+// expect: A final step must be the last element of its pipeline.
 amends "../../Config.pkl"
 
 pipelines {

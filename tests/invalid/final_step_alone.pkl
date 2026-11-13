@@ -1,4 +1,5 @@
 // Invalid: at least one non-final step must precede a final step.
+// expect: A final step must follow at least one ordinary step.
 amends "../../Config.pkl"
 
 pipelines {

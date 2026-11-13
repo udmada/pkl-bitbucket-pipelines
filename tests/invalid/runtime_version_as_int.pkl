@@ -1,4 +1,5 @@
 // Invalid: the runtime version is the string "2" or "3", matching the documented YAML form.
+// expect: Expected value of type `"2"|"3"`, but got type `Int`.
 amends "../../Config.pkl"
 
 pipelines {

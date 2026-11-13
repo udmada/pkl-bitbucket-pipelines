@@ -68,7 +68,17 @@ definitions: Definitions?
 /// (in which case define them under [Definitions.pipelines] instead).
 ///
 /// See [Pipeline start conditions](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
-pipelines: PipelineDefinitions?(this != null || definitions?.pipelines != null)
+///
+/// Three things are checked across the whole configuration, because a mistake in any of them is
+/// otherwise only reported by Bitbucket after a push: at least one pipeline must be defined, every
+/// [ChildPipelineStep.custom] must name a pipeline under [PipelineDefinitions.custom], and every
+/// name in [BaseStep.services] must be `docker` or a key of [Definitions.services].
+pipelines: PipelineDefinitions?(
+  this != null || definitions?.pipelines != null,
+  this == null || definesAPipeline(this),
+  this == null || childPipelinesAreDefined(this),
+  this == null || servicesAreDefined(this, definitions?.services?.keys ?? Set())
+)
 
 /// Condition-based rules that start one or more custom pipelines in parallel from a single
 /// repository event.
@@ -76,8 +86,19 @@ pipelines: PipelineDefinitions?(this != null || definitions?.pipelines != null)
 /// Triggers are cumulative with the start conditions under [pipelines]: if both match an event,
 /// both run.
 ///
+///
+/// Every pipeline a trigger names must be defined under [PipelineDefinitions.custom]; a name that
+/// is not fails evaluation.
+///
 /// See [The triggers property](https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/).
-triggers: Triggers?
+triggers: Triggers?(
+  this == null || triggeredPipelinesAreDefined(this, pipelines?.custom?.keys ?? Set())
+)
+
+/// Free-form key-value data attached to the configuration, such as `["buildTool"] = "maven"`.
+///
+/// Bitbucket does not interpret these; they are metadata for whatever reads the file.
+labels: Mapping<String, Any>(!isEmpty)?
 
 //---------------------------------------------------------------------------------------------
 // Pipelines
@@ -91,11 +112,11 @@ class PipelineDefinitions {
   /// Runs on every push that does not match a pipeline in [branches].
   ///
   /// Pushes of Git tags do not start the default pipeline.
-  `default`: Pipeline?
+  `default`: AutomaticPipeline?
 
   /// Branch-specific pipelines, keyed by branch name or
   /// [glob pattern](https://support.atlassian.com/bitbucket-cloud/docs/use-glob-patterns-on-the-pipelines-yaml-file/).
-  branches: Mapping<String, Pipeline>?
+  branches: Mapping<String, AutomaticPipeline>(!isEmpty)?
 
   /// Pipelines that run when a pull request is created or updated, keyed by a branch name or
   /// glob pattern matched against the *source* branch.
@@ -105,57 +126,171 @@ class PipelineDefinitions {
   ///
   /// These run *in addition* to any matching [branches] or [`default`] pipeline, so overlapping
   /// definitions can produce two concurrent pipelines.
-  `pull-requests`: Mapping<String, Pipeline>?
+  `pull-requests`: Mapping<String, AutomaticPipeline>(!isEmpty)?
 
   /// Tag-specific pipelines, keyed by tag name or glob pattern.
   ///
   /// Matched against both lightweight and annotated tags.
-  tags: Mapping<String, Pipeline>?
+  tags: Mapping<String, AutomaticPipeline>(!isEmpty)?
 
   /// Pipelines that only start when triggered manually from the Bitbucket UI, by a schedule, or
   /// by a [Triggers] rule, keyed by the name shown in the UI.
   ///
   /// Only custom pipelines can be referenced by [TriggerCondition.pipelines] and by
   /// [ChildPipelineStep.custom].
-  custom: Mapping<String, Pipeline>?
+  custom: Mapping<String, Pipeline>(!isEmpty)?
 }
 
 /// A single pipeline: either a sequence of elements to run, or an import of a pipeline shared
 /// from elsewhere.
 ///
-/// The sequence form enforces the ordering rules Bitbucket applies on push: a [FinalStep] must
-/// come last and follow at least one ordinary step, a [Variables] element may only come first,
-/// and the first step or stage of a pipeline cannot be `manual`.
+/// The sequence form enforces the rules Bitbucket applies on push: a pipeline must run at least
+/// one step, a [FinalStep] must come last and follow at least one ordinary step, a [Variables]
+/// element may only come first, and the first step or stage of a pipeline — including every step
+/// of a [Parallel] group that comes first — cannot be `manual`.
 typealias Pipeline = *Listing<PipelineElement>(
+    runsAtLeastOneStep(toList()),
     finalStepComesLast(toList()),
     variablesComeFirst(toList()),
     firstElementIsNotManual(toList())
   ) | PipelineImport
 
+/// A [Pipeline] started by a repository event rather than by a person: every start condition other
+/// than [PipelineDefinitions.custom].
+///
+/// Nobody is there to be prompted, so it cannot declare [Variables].
+typealias AutomaticPipeline = Pipeline(declaresNoVariables(this))
+
+/// Whether [pipeline] is free of [Variables] elements. An imported pipeline is not inspected.
+const local function declaresNoVariables(pipeline: Listing | PipelineImport): Boolean =
+  if (pipeline is PipelineImport || pipeline.toList().every((it) -> !(it is Variables))) true
+  else throw("Only pipelines under `custom` can declare variables.")
+
+/// Whether [elements] holds anything that runs: an empty pipeline, or one that only declares
+/// [Variables], is rejected by Bitbucket.
+const local function runsAtLeastOneStep(elements: List<PipelineElement>): Boolean =
+  if (elements.any((it) -> !(it is Variables))) true
+  else throw("A pipeline must run at least one step.")
+
 /// Whether any [FinalStep] in [elements] is the last element, preceded by at least one ordinary
 /// step.
 const local function finalStepComesLast(elements: List<PipelineElement>): Boolean =
   let (finalCount = elements.count((it) -> it is FinalStep))
-    finalCount == 0
-    ||
-    (finalCount == 1
-      && elements.last is FinalStep
-      && elements.any((it) -> it is (Step|ChildPipelineStep|Parallel|ParallelSteps|Stage)))
+    if (finalCount == 0) true
+    else if (finalCount > 1) throw("A pipeline can have at most one final step.")
+    else if (!(elements.last is FinalStep))
+      throw("A final step must be the last element of its pipeline.")
+    else if (!elements.any((it) -> it is (Step|ChildPipelineStep|Parallel|ParallelSteps|Stage)))
+      throw("A final step must follow at least one ordinary step.")
+    else true
 
 /// Whether every [Variables] element in [elements] comes first, where custom pipeline variables
 /// must be declared.
 const local function variablesComeFirst(elements: List<PipelineElement>): Boolean =
-  elements.drop(1).every((it) -> !(it is Variables))
+  if (elements.drop(1).every((it) -> !(it is Variables))) true
+  else throw("A variables element must be the first element of its pipeline.")
 
 /// Whether the first step or stage in [elements] starts automatically.
 ///
 /// [Variables] elements are skipped: in a custom pipeline they precede the first step.
 const local function firstElementIsNotManual(elements: List<PipelineElement>): Boolean =
   let (first = elements.filter((it) -> !(it is Variables)).firstOrNull)
+  let (automatic =
     if (first is Step) first.trigger != "manual"
     else if (first is ChildPipelineStep) first.trigger != "manual"
     else if (first is Stage) first.trigger != "manual"
+    else if (first is Parallel) first.steps.toList().every((it) -> it.trigger != "manual")
+    else if (first is ParallelSteps) first.steps.toList().every((it) -> it.trigger != "manual")
     else true
+  )
+    if (automatic) true
+    else throw("The first step or stage of a pipeline cannot be manual.")
+
+/// Whether [definitions] holds at least one pipeline under some start condition.
+const local function definesAPipeline(definitions: PipelineDefinitions): Boolean =
+  if (!pipelinesIn(definitions).isEmpty) true
+  else throw("`pipelines` must define a pipeline under at least one start condition.")
+
+/// Every pipeline in [definitions], whatever starts it.
+const local function pipelinesIn(definitions: PipelineDefinitions): List =
+  List(definitions.`default`).filterNonNull()
+    + (definitions.branches?.toMap()?.values ?? List())
+    + (definitions.`pull-requests`?.toMap()?.values ?? List())
+    + (definitions.tags?.toMap()?.values ?? List())
+    + (definitions.custom?.toMap()?.values ?? List())
+
+/// Every step in [pipeline], including those nested in parallel groups and stages. An imported
+/// pipeline contributes none: its steps live in another file.
+const local function stepsIn(pipeline: Listing | PipelineImport): List =
+  if (pipeline is PipelineImport) List()
+  else
+    pipeline.toList().flatMap((it) ->
+      if (it is Parallel) it.steps.toList()
+      else if (it is ParallelSteps) it.steps.toList()
+      else if (it is Stage) it.steps.toList()
+      else if (it is Variables) List()
+      else List(it)
+    )
+
+/// Whether every [ChildPipelineStep] in [definitions] names a pipeline under
+/// [PipelineDefinitions.custom]. Throws, naming the culprits, rather than returning `false`.
+const local function childPipelinesAreDefined(definitions: PipelineDefinitions): Boolean =
+  let (defined = definitions.custom?.keys ?? Set())
+  let (missing =
+    pipelinesIn(definitions)
+      .flatMap((it) -> stepsIn(it))
+      .filter((it) -> it is ChildPipelineStep)
+      .map((it) -> it.custom)
+      .filter((it) -> !defined.contains(it))
+      .distinct
+  )
+    if (missing.isEmpty) true
+    else
+      throw(
+        "Child pipeline steps reference custom pipelines that are not defined under "
+          + "`pipelines.custom`: \(missing.join(", "))"
+      )
+
+/// Whether every service a step in [definitions] asks for is `docker` or one of [defined].
+/// Throws, naming the culprits, rather than returning `false`.
+const local function servicesAreDefined(
+  definitions: PipelineDefinitions,
+  defined: Set<String>
+): Boolean =
+  let (missing =
+    pipelinesIn(definitions)
+      .flatMap((it) -> stepsIn(it))
+      .filter((it) -> it is BaseStep)
+      .flatMap((it) -> it.services?.toList() ?? List())
+      .filter((it) -> it != "docker" && !defined.contains(it))
+      .distinct
+  )
+    if (missing.isEmpty) true
+    else
+      throw(
+        "Steps reference services that are not defined under `definitions.services`: "
+          + missing.join(", ")
+      )
+
+/// Whether every pipeline named by a condition in [triggers] is one of [defined]. Throws, naming
+/// the culprits, rather than returning `false`.
+const local function triggeredPipelinesAreDefined(triggers: Triggers, defined: Set<String>): Boolean =
+  let (missing =
+    triggers
+      .toMap()
+      .values
+      .filterNonNull()
+      .flatMap((conditions) -> conditions.toList())
+      .flatMap((it) -> it.pipelines.toList())
+      .filter((it) -> !defined.contains(it))
+      .distinct
+  )
+    if (missing.isEmpty) true
+    else
+      throw(
+        "Triggers reference custom pipelines that are not defined under `pipelines.custom`: "
+          + missing.join(", ")
+      )
 
 /// Runs a pipeline definition shared from another file or repository in place of a local one.
 ///
@@ -280,7 +415,7 @@ abstract class BaseStep extends PipelineElement {
   ///
   /// Each name must be a key of [Definitions.services], or `docker` for the built-in
   /// Docker-in-Docker service. At most five services per step.
-  services: Listing<String>?
+  services: Listing<String>(length <= 5)?
 
   /// Git clone behavior for this step, overriding the configuration-wide [clone].
   clone: StepClone?
@@ -324,6 +459,21 @@ abstract class BaseStep extends PipelineElement {
   /// At most one step per group runs at a time, across pipelines; the rest queue first-in,
   /// first-out.
   `concurrency-group`: String?
+
+  /// Additional authentication granted to the step.
+  auth: StepAuth?
+}
+
+/// Authentication configuration for a step.
+class StepAuth {
+  /// System-level authentication for the step.
+  system: SystemAuth?
+}
+
+/// System-level authentication for a step.
+class SystemAuth {
+  /// Additional system scopes to grant the step. Each scope may be listed once.
+  scopes: Listing<String>(isDistinct)?
 }
 
 /// A step that triggers another pipeline — a "child pipeline" — instead of running commands.
@@ -352,7 +502,7 @@ class ChildPipelineStep extends PipelineElement {
   /// Variables to pass into the child pipeline, where they become pipeline variables.
   ///
   /// At most 20 entries.
-  `input-variables`: Mapping<VariableName, String | Number | Boolean>?(length <= 20)
+  `input-variables`: Mapping<VariableName, String | Number | Boolean>(length <= 20)?
 
   /// Named artifacts to hand into the child pipeline and to carry back out of it.
   artifacts: ChildPipelineArtifacts?
@@ -425,8 +575,9 @@ class ParallelSteps extends PipelineElement {
 /// A stage holds at most 10 steps on the Free plan and 100 on Standard or Premium. Stages cannot
 /// be nested or parallelized, cannot contain [Parallel] groups, [FinalStep]s, or
 /// [ChildPipelineStep]s, and cannot contain individually manual or conditional steps — make the
-/// stage itself manual or conditional instead. Steps in a stage cannot override a property set
-/// on the stage, nor opt out of downloading artifacts.
+/// stage itself manual or conditional instead. A `condition` on a step in a stage fails
+/// evaluation. Steps in a stage cannot override a property set on the stage, nor opt out of
+/// downloading artifacts.
 ///
 /// See [Stage options](https://support.atlassian.com/bitbucket-cloud/docs/stage-options/).
 class Stage extends PipelineElement {
@@ -455,9 +606,14 @@ class Stage extends PipelineElement {
   /// How to handle failure of the steps in this stage, unless a step overrides it.
   `on-fail`: OnFail?
 
-  /// The steps to run in order. At least one is required.
-  steps: Listing<Step>(!isEmpty)
+  /// The steps to run in order. At least one is required, and none may carry a `condition`.
+  steps: Listing<Step>(!isEmpty, stageStepsAreUnconditional(toList()))
 }
+
+/// Whether no step in [steps] carries a condition of its own.
+const local function stageStepsAreUnconditional(steps: List<Step>): Boolean =
+  if (steps.every((it) -> it.condition == null)) true
+  else throw("A step in a stage cannot have a `condition`; set it on the stage instead.")
 
 /// Variables that can be set when a custom pipeline is started.
 ///
@@ -544,8 +700,9 @@ class ArtifactsSpec {
   /// controls of [upload].
   paths: Listing<String>?
 
-  /// Named artifacts to keep, with control over type, exclusions, and when to capture them.
-  upload: Listing<ArtifactUpload>?
+  /// Named artifacts to keep, with control over type, exclusions, and when to capture them — or a
+  /// bare list of glob patterns.
+  upload: Listing<*ArtifactUpload | String>(!isEmpty)?
 }
 
 /// A named artifact produced by a step.
@@ -650,7 +807,12 @@ class Changesets {
   /// Skips the step or stage when *every* changed file matches one of these patterns.
   ///
   /// Useful for not rebuilding on documentation-only changes.
-  excludePaths: Listing<String>(!isEmpty)?(this != null || includePaths != null)
+  ///
+  /// Exactly one of [includePaths] and [excludePaths] must be set; Bitbucket accepts only one.
+  excludePaths: Listing<String>(!isEmpty)?(
+    this != null || includePaths != null,
+    this == null || includePaths == null
+  )
 }
 
 /// What to do when a step fails.
@@ -965,6 +1127,10 @@ class GlobalOptions {
 
   /// The runtime environment for every step.
   runtime: Runtime?
+
+  /// Labels identifying which self-hosted runner runs every step, unless a step overrides them
+  /// with [BaseStep.runs-on].
+  `runs-on`: (*Listing<String> | String)?
 }
 
 /// How long a step may run, in minutes: from 1 to 720.
@@ -984,7 +1150,76 @@ typealias Size = "1x" | "2x" | "4x" | "8x" | "16x" | "24x" | "32x"
 /// The runtime environment for a step.
 class Runtime {
   /// Runtime settings for steps running on Bitbucket Cloud infrastructure.
-  cloud: CloudRuntime
+  cloud: CloudRuntime?
+
+  /// Runtime settings for steps running on a self-hosted runner.
+  ///
+  /// At least one of [cloud] and [`self-hosted`] must be set.
+  `self-hosted`: SelfHostedRuntime?(this != null || cloud != null)
+}
+
+/// Runtime settings for steps running on a self-hosted runner.
+class SelfHostedRuntime {
+  /// The CPU available to the runner.
+  cpu: Int(isPositive)?
+
+  /// The memory available to the runner, in megabytes.
+  memory: Int(isPositive)?
+
+  /// Where the runner stores caches and artifacts.
+  storage: RunnerStorage?
+
+  /// Volumes to mount into the build container, each as `<host-directory>:<container-path>`.
+  volumes: Listing<String>?
+}
+
+/// External storage for a self-hosted runner: exactly one of [gcp] and [aws].
+class RunnerStorage {
+  /// A Google Cloud Storage bucket.
+  gcp: GcpStorage?
+
+  /// An Amazon S3 bucket.
+  aws: AwsStorage?(
+    if (this == null) gcp != null else gcp == null
+  )
+}
+
+/// A Google Cloud Storage bucket used by a self-hosted runner.
+class GcpStorage {
+  /// The name of the bucket.
+  bucket: String
+
+  /// The contents of the GCP key file, Base64-encoded.
+  ///
+  /// Reference a secured repository or workspace variable rather than writing the value here.
+  `key-file`: String
+}
+
+/// An Amazon S3 bucket used by a self-hosted runner.
+///
+/// Supply either [`access-key`] together with [`secret-key`], or [`oidc-role`] alone.
+class AwsStorage {
+  /// The name of the bucket.
+  bucket: String
+
+  /// The AWS region the bucket is in.
+  region: String
+
+  /// An AWS access key ID.
+  `access-key`: String?
+
+  /// The AWS secret access key matching [`access-key`].
+  ///
+  /// Reference a secured repository or workspace variable rather than writing the value here.
+  `secret-key`: String?
+
+  /// The ARN of the IAM role to assume by way of OpenID Connect.
+  `oidc-role`: String?(
+    if (this == null)
+      `access-key` != null && `secret-key` != null
+    else
+      `access-key` == null && `secret-key` == null
+  )
 }
 
 /// Runtime settings for steps running on Bitbucket Cloud infrastructure.
@@ -1011,6 +1246,12 @@ class CloudRuntime {
   ///
   /// `arm` requires a Standard or Premium plan.
   arch: ("x86" | "arm")?
+
+  /// The operating system the step runs on. Defaults to `linux`.
+  platform: ("linux" | "windows")?
+
+  /// The instance type to run the step on.
+  `instance-type`: String?
 }
 
 //---------------------------------------------------------------------------------------------

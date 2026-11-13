@@ -1,0 +1,46 @@
+// Valid: Properties added from Bitbucket's published JSON schema.
+amends "../../Config.pkl"
+
+labels {
+  ["buildTool"] = "maven"
+}
+
+options {
+  `runs-on` { "self.hosted"; "linux" }
+  runtime {
+    `self-hosted` {
+      cpu = 4
+      memory = 8192
+      volumes { "/var/cache:/cache" }
+      storage {
+        aws {
+          bucket = "runner-cache"
+          region = "ap-southeast-2"
+          `oidc-role` = "arn:aws:iam::123456789012:role/runner"
+        }
+      }
+    }
+  }
+}
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+      runtime {
+        cloud {
+          platform = "linux"
+          `instance-type` = "standard"
+        }
+      }
+      auth {
+        system {
+          scopes { "repository:read" }
+        }
+      }
+      artifacts = new ArtifactsSpec {
+        upload { "dist/**" }
+      }
+    }
+  }
+}

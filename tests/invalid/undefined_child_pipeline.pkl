@@ -1,0 +1,18 @@
+// Invalid: a child pipeline step must name a pipeline defined under `custom`.
+// expect: Child pipeline steps reference custom pipelines that are not defined under `pipelines.custom`: publsih
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new ChildPipelineStep {
+      custom = "publsih"
+    }
+  }
+  custom {
+    ["publish"] {
+      new Step {
+        script { "./publish.sh" }
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 // Invalid: `max-time` exceeds the 720-minute ceiling.
+// expect: `isBetween(1, 720)`
 amends "../../Config.pkl"
 
 pipelines {

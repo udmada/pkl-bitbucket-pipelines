@@ -1,0 +1,22 @@
+// Invalid: a trigger must name a pipeline defined under `custom`.
+// expect: Triggers reference custom pipelines that are not defined under `pipelines.custom`: build-web
+amends "../../Config.pkl"
+
+pipelines {
+  custom {
+    ["build-api"] {
+      new Step {
+        script { "./build.sh" }
+      }
+    }
+  }
+}
+
+triggers {
+  `repository-push` {
+    new {
+      condition = #"BITBUCKET_BRANCH == "main""#
+      pipelines { "build-web" }
+    }
+  }
+}

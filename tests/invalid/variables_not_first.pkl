@@ -1,4 +1,5 @@
 // Invalid: custom pipeline variables must be declared as the first element.
+// expect: A variables element must be the first element of its pipeline.
 amends "../../Config.pkl"
 
 pipelines {

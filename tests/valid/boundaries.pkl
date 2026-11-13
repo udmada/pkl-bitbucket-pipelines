@@ -1,0 +1,69 @@
+// Valid: Configurations that sit right at the edge of a constraint and must stay accepted.
+amends "../../Config.pkl"
+
+definitions {
+  services {
+    for (service in List("a", "b", "c", "d")) {
+      [service] { image = "redis:8" }
+    }
+  }
+}
+
+pipelines {
+  `default` {
+    // Five services is the limit, and `docker` needs no definition.
+    new Step {
+      script { "./test.sh" }
+      services { "a"; "b"; "c"; "d"; "docker" }
+      condition {
+        changesets {
+          excludePaths { "docs/**" }
+        }
+      }
+    }
+    // A manual step is fine in a parallel group that is not first.
+    new Parallel {
+      steps {
+        new Step {
+          trigger = "manual"
+          script { "./deploy.sh" }
+        }
+      }
+    }
+    // A step in a stage may say `automatic`; only the stage can be manual or conditional.
+    new Stage {
+      trigger = "manual"
+      condition {
+        state = "DEPLOY_ENABLED == true"
+      }
+      steps {
+        new Step {
+          trigger = "automatic"
+          script { "./release.sh" }
+        }
+      }
+    }
+  }
+  custom {
+    // Variables alone at the head of a custom pipeline.
+    ["release"] {
+      new Variables {
+        variables {
+          new { name = "CHANNEL" }
+        }
+      }
+      new Step {
+        script { "./release.sh" }
+      }
+    }
+  }
+}
+
+triggers {
+  `repository-push` {
+    new {
+      condition = #"BITBUCKET_BRANCH == "main""#
+      pipelines { "release" }
+    }
+  }
+}

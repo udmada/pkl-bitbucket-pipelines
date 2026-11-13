@@ -1,4 +1,5 @@
 // Invalid: the first step of a pipeline cannot be manual.
+// expect: The first step or stage of a pipeline cannot be manual.
 amends "../../Config.pkl"
 
 pipelines {

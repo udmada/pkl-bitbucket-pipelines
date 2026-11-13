@@ -1,0 +1,7 @@
+// Invalid: a pipeline must run at least one step.
+// expect: A pipeline must run at least one step.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {}
+}

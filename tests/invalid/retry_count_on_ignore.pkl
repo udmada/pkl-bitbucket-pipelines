@@ -1,4 +1,5 @@
 // Invalid: `maxRetryCount` is only meaningful when the strategy is `retry`.
+// expect: `this == null || (strategy == "retry" && isBetween(1, 10))`
 amends "../../Config.pkl"
 
 pipelines {

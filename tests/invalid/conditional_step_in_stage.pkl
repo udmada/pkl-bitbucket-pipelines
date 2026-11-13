@@ -1,0 +1,18 @@
+// Invalid: a step in a stage cannot carry its own condition.
+// expect: A step in a stage cannot have a `condition`; set it on the stage instead.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Stage {
+      steps {
+        new Step {
+          script { "./deploy.sh" }
+          condition {
+            state = "DEPLOY_ENABLED == true"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+// Invalid: only custom pipelines can declare variables.
+// expect: Only pipelines under `custom` can declare variables.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Variables {
+      variables {
+        new { name = "CHANNEL" }
+      }
+    }
+    new Step {
+      script { "./build.sh" }
+    }
+  }
+}

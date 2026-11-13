@@ -93,7 +93,7 @@ Note that `default` and `import` are Pkl keywords, so they need backticks: `` `d
 
 | Area | Types |
 | --- | --- |
-| Root | `image`, `clone`, `options`, `export`, `definitions`, `pipelines`, `triggers` |
+| Root | `image`, `clone`, `options`, `export`, `definitions`, `pipelines`, `triggers`, `labels` |
 | Start conditions | `PipelineDefinitions` — `default`, `branches`, `pull-requests`, `tags`, `custom` |
 | Pipeline entries | `Step`, `FinalStep`, `ChildPipelineStep`, `Stage`, `Parallel`, `ParallelSteps`, `Variables` |
 | Scripts | `ScriptItem`, `Pipe` |
@@ -102,7 +102,7 @@ Note that `default` and `import` are Pkl keywords, so they need backticks: `` `d
 | Event triggers | `Triggers`, `TriggerCondition` — including `glob`, `changesetInclude`, `changesetExclude` |
 | Definitions | `Cache`, `CacheKey`, `Service`, `imports`, exported `pipelines` |
 | Images | `Image`, `ImageSpec`, `AwsAuth` |
-| Runtime | `GlobalOptions`, `Runtime`, `CloudRuntime` (including Runtime v3), `Size`, `MaxTime` |
+| Runtime | `GlobalOptions`, `Runtime`, `CloudRuntime` (including Runtime v3), `SelfHostedRuntime`, `Size`, `MaxTime` |
 
 Every property carries the documentation from the Atlassian reference, so editors with
 [Pkl language support](https://pkl-lang.org/main/current/tools.html) show allowed values,
@@ -160,7 +160,7 @@ Two things to know when reusing steps this way:
 also defines every task:
 
 ```console
-mise run test              # snapshot tests plus the version-consistency checks
+mise run test              # snapshot, version-consistency, and must-fail tests
 mise run test:record       # re-record the snapshots after an intended schema change
 mise run pkl:gen           # regenerate .github/workflows/ from .github/pkl/
 mise run doc               # generate API docs into .out/doc/
@@ -277,16 +277,39 @@ would break its consumers whenever they churn. They are reasonable choices for a
 this repo (excluded from the package), which is exactly how `com.github.actions` is used for the
 workflows under `.github/pkl/`.
 
+## What is checked
+
+Beyond property names and value ranges, these rules fail at evaluation time, each with a message
+that says what is wrong:
+
+- A pipeline must run at least one step, and `pipelines` must define at least one pipeline.
+- A `FinalStep` must be last, alone, and preceded by at least one ordinary step.
+- A `Variables` element must come first, and only in a pipeline under `custom`.
+- The first step or stage of a pipeline — including any step of a leading `Parallel` group —
+  cannot be `manual`.
+- A step in a `Stage` cannot carry its own `condition`.
+- A step can use at most five services, each of which must be `docker` or a key of
+  `definitions.services`.
+- Every `ChildPipelineStep.custom`, and every pipeline named by a trigger, must be a key of
+  `pipelines.custom`. Typos are reported by name.
+- `Changesets` takes `includePaths` or `excludePaths`, not both.
+
+Service and child-pipeline references are checked for steps under `pipelines` only. Pipelines
+under `definitions.pipelines` are exported for another file to import, so the names they refer to
+may be defined there instead.
+
 ## Caveats
 
 A few limits in the Atlassian reference are prose-only and are documented on the relevant types
 rather than enforced, because they depend on context this schema cannot see:
 
 - The 100-step ceiling per pipeline, and the 10-or-100-step ceiling per stage (plan-dependent).
-- A `FinalStep` must be last, and at least one non-final step must precede it.
-- Manual steps and stages cannot come first in a pipeline.
-- Steps in a `Stage` cannot override a property set on the stage.
+- Steps in a `Stage` cannot be individually manual, nor override a property set on the stage.
+- Cache names in a step are not checked against `definitions.caches`, because Bitbucket's list of
+  predefined caches changes.
 - Sizes above `2x`, `arch = "arm"`, and configuration sharing require a paid or Premium plan.
+
+`definitions.agents` is not modelled yet.
 
 `Cache.path` is required here, though the reference marks it optional; a keyed cache with no path
 has nothing to store. Use the string shorthand — `["name"] = "some/path"` — for a cache that

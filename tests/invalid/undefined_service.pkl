@@ -1,0 +1,18 @@
+// Invalid: a step can only use services that are defined, or the built-in `docker`.
+// expect: Steps reference services that are not defined under `definitions.services`: postgers
+amends "../../Config.pkl"
+
+definitions {
+  services {
+    ["postgres"] { image = "postgres:18" }
+  }
+}
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./test.sh" }
+      services { "postgers" }
+    }
+  }
+}

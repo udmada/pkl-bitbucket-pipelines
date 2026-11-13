@@ -17,14 +17,27 @@ run = ["pkl test tests/*.pkl", "mise run test:invalid"]
 # fail evaluation are checked from the shell instead: each file under tests/invalid/ must make
 # `pkl eval` exit non-zero. This is what guards the schema's constraints against being
 # accidentally loosened.
+#
+# Failing is not enough on its own — a typo in the test file fails too. Each file therefore
+# carries a `// expect: <text>` line, and the error must contain that text verbatim, so a case
+# only passes when it is rejected for the reason it was written to exercise.
 [tasks."test:invalid"]
-description = "Check that every configuration under tests/invalid/ fails to evaluate"
+description = "Check that every configuration under tests/invalid/ fails to evaluate, for the expected reason"
 run = '''
 set -eu
 status=0
 for f in tests/invalid/*.pkl; do
-  if pkl eval "$f" >/dev/null 2>&1; then
+  expect="$(sed -n 's|^// expect: ||p' "$f" | head -n 1)"
+  if [ -z "$expect" ]; then
+    echo "FAIL: $f has no '// expect: <text>' line" >&2
+    status=1
+  elif output="$(pkl eval "$f" 2>&1)"; then
     echo "FAIL: $f evaluated cleanly but must be rejected" >&2
+    status=1
+  elif ! printf '%s\n' "$output" | grep -qF -- "$expect"; then
+    echo "FAIL: $f was rejected, but not with the expected error" >&2
+    echo "  expected: $expect" >&2
+    echo "  got:      $(printf '%s\n' "$output" | sed -n 2p)" >&2
     status=1
   else
     echo "ok: $f rejected"

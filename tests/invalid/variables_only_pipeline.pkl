@@ -1,0 +1,15 @@
+// Invalid: declaring variables is not enough; a pipeline must run at least one step.
+// expect: A pipeline must run at least one step.
+amends "../../Config.pkl"
+
+pipelines {
+  custom {
+    ["release"] {
+      new Variables {
+        variables {
+          new { name = "CHANNEL" }
+        }
+      }
+    }
+  }
+}

@@ -399,4 +399,114 @@ examples {
     
     """
   }
+  ["valid/additional_properties.yaml"] {
+    """
+    options:
+      runtime:
+        self-hosted:
+          cpu: 4
+          memory: 8192
+          storage:
+            aws:
+              bucket: runner-cache
+              region: ap-southeast-2
+              oidc-role: arn:aws:iam::123456789012:role/runner
+          volumes:
+          - /var/cache:/cache
+      runs-on:
+      - self.hosted
+      - linux
+    pipelines:
+      default:
+      - step:
+          script:
+          - ./build.sh
+          artifacts:
+            upload:
+            - dist/**
+          runtime:
+            cloud:
+              platform: linux
+              instance-type: standard
+          auth:
+            system:
+              scopes:
+              - repository:read
+    labels:
+      buildTool: maven
+    
+    """
+  }
+  ["valid/boundaries.yaml"] {
+    """
+    definitions:
+      services:
+        a:
+          image: redis:8
+        b:
+          image: redis:8
+        c:
+          image: redis:8
+        d:
+          image: redis:8
+    pipelines:
+      default:
+      - step:
+          script:
+          - ./test.sh
+          services:
+          - a
+          - b
+          - c
+          - d
+          - docker
+          condition:
+            changesets:
+              excludePaths:
+              - docs/**
+      - parallel:
+          steps:
+          - step:
+              script:
+              - ./deploy.sh
+              trigger: manual
+      - stage:
+          condition:
+            state: DEPLOY_ENABLED == true
+          trigger: manual
+          steps:
+          - step:
+              script:
+              - ./release.sh
+              trigger: automatic
+      custom:
+        release:
+        - variables:
+          - name: CHANNEL
+        - step:
+            script:
+            - ./release.sh
+    triggers:
+      repository-push:
+      - condition: BITBUCKET_BRANCH == "main"
+        pipelines:
+        - release
+    
+    """
+  }
+  ["valid/minimal_child_pipeline.yaml"] {
+    """
+    pipelines:
+      default:
+      - step:
+          type: pipeline
+          custom: publish
+      custom:
+        publish:
+        - step:
+            script:
+            - ./publish.sh
+    
+    """
+  }
 }

@@ -1,0 +1,19 @@
+// Invalid: a parallel group that comes first cannot hold a manual step.
+// expect: The first step or stage of a pipeline cannot be manual.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Parallel {
+      steps {
+        new Step {
+          script { "./build.sh" }
+        }
+        new Step {
+          trigger = "manual"
+          script { "./deploy.sh" }
+        }
+      }
+    }
+  }
+}

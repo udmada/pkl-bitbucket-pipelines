@@ -1,0 +1,17 @@
+// Valid: A child pipeline step needs nothing but the pipeline to run; `input-variables` is optional.
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new ChildPipelineStep {
+      custom = "publish"
+    }
+  }
+  custom {
+    ["publish"] {
+      new Step {
+        script { "./publish.sh" }
+      }
+    }
+  }
+}

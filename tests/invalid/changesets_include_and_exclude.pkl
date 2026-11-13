@@ -1,0 +1,17 @@
+// Invalid: a changeset condition takes `includePaths` or `excludePaths`, not both.
+// expect: `this == null || includePaths == null`
+amends "../../Config.pkl"
+
+pipelines {
+  `default` {
+    new Step {
+      script { "./build.sh" }
+      condition {
+        changesets {
+          includePaths { "src/**" }
+          excludePaths { "docs/**" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+// Invalid: `pipelines` must define a pipeline under at least one start condition.
+// expect: `pipelines` must define a pipeline under at least one start condition.
+amends "../../Config.pkl"
+
+pipelines {}
